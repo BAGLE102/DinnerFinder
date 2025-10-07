@@ -21,6 +21,19 @@ app.post('/callback', line.middleware(config.line), (req, res) => {
       res.status(500).end()
     })
 })
+// 放在 src/app.js 其他路由下面即可
+import mongoose from 'mongoose';
+
+app.get('/db-ping', async (_req, res) => {
+  try {
+    // 方式A：MongoDB 原生 ping
+    const admin = mongoose.connection.db.admin();
+    const pong = await admin.ping();   // { ok: 1 }
+    res.json({ ok: true, ping: pong });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
 
 // event handler
 function handleEvent (event) {
