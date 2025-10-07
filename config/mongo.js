@@ -3,7 +3,8 @@ import config from './config.js'
 
 async function connectMongoDB () {
   try {
-    const connectionURL = `${config.mongo.schema}://${config.mongo.username}:${config.mongo.password}@${config.mongo.host}`
+    const connectionURL = `MONGO_URI=mongodb+srv://Finder_001:<Finder_001>@cluster0.zqkfd8r.mongodb.net/line_dinner?retryWrites=true&w=majority&appName=Cluster0'
+
 
     mongoose.connection.on('connected', () => {
       console.log('=== MongoDB is connected ===')
