@@ -6,7 +6,7 @@ import config from './config/config.js'
 import connectMongoDB from './config/mongo.js'
 import controller from './controller/index.js'
 
-connectMongoDB()
+
 
 const app = express()
 
@@ -21,6 +21,7 @@ app.post('/callback', line.middleware(config.line), (req, res) => {
       res.status(500).end()
     })
 })
+connectMongoDB()
 // 放在 src/app.js 其他路由下面即可
 import mongoose from 'mongoose';
 
