@@ -1,8 +1,6 @@
 import mongoose from 'mongoose'
 import config from './config.js'
 
-// ESM
-import mongoose from 'mongoose';
 
 export async function connectMongoDB() {
   // 1) 從環境變數讀，**不要**在程式裡硬寫 URI
