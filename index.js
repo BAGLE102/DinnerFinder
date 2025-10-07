@@ -21,7 +21,7 @@ app.post('/callback', line.middleware(config.line), (req, res) => {
       res.status(500).end()
     })
 })
-connectMongoDB()
+//connectMongoDB()
 // 放在 src/app.js 其他路由下面即可
 import mongoose from 'mongoose';
 
