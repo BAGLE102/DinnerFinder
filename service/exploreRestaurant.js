@@ -1,6 +1,6 @@
 // service/exploreRestaurant.js
 import fetch from 'node-fetch';
-import { User } from '../model/user.js';           // 依你的實際路徑
+import model from '../model/user.js'          // 依你的實際路徑
 // 如果你用的是 default export：import User from '../models/User.js'
 
 const PLACES_ENDPOINT = 'https://maps.googleapis.com/maps/api/place/nearbysearch/json';
