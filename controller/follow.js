@@ -1,19 +1,11 @@
-import service from '../service/index.js'
-import ErrorRes from '../lib/errorRes.js'
-import { replyText } from '../lib/replyHelper.js'
-
-export default async function (event) {
-  const { replyToken, source } = event
-  const { userId } = source
-
-  try {
-    return service.followBot(replyToken, { userId })
-  } catch (err) {
-    if (err instanceof ErrorRes) {
-      return replyText(replyToken, err.message)
-    } else {
-      console.error(err)
-      return replyText(replyToken, 'Server error')
-    }
-  }
+export default async function onFollow(client, event) {
+  const text =
+    '哈囉！\n\n常用指令：\n' +
+    '• 新增 店名\n' +
+    '• 移除 店名\n' +
+    '• 我的餐廳 / get\n' +
+    '• 隨機 / random\n' +
+    '• 探索 / explore 1500\n' +
+    '• 傳一則「位置訊息」給我，我才能用附近餐廳當候補喔！';
+  return client.replyMessage(event.replyToken, { type: 'text', text });
 }
