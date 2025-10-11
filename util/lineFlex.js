@@ -21,7 +21,7 @@ export function restaurantBubble(r) {
     heroImageUrl = r.photoUrl;
   }
 
-  const addData = `action=add&name=${encodeURIComponent(name)}`; // 用 add 當觸發詞
+  const addData = `action=add&name=${encodeURIComponent(name)}`;
   const chooseData = `action=choose&name=${encodeURIComponent(name)}`;
 
   return {
@@ -57,7 +57,6 @@ export function restaurantsCarousel(list) {
   return { type: 'carousel', contents: bubbles };
 }
 
-// 基礎 Quick Reply（可加 extra）
 export function quickReply(extraItems = []) {
   const base = [
     { type: 'action', action: { type: 'message', label: '探索 1500', text: '探索 1500' } },
@@ -70,20 +69,19 @@ export function quickReply(extraItems = []) {
   return { items: [...base, ...extraItems] };
 }
 
-// explore 的「再 10 間」
-export function moreQuickItem(nextToken, lineUserId) {
+// ✅ 改成用 key（短字串）避免超過 300 字元限制
+export function moreQuickItem(key, lineUserId) {
   return {
     type: 'action',
     action: {
       type: 'postback',
       label: '再 10 間',
-      data: `action=explore_more&token=${encodeURIComponent(nextToken)}&user=${encodeURIComponent(lineUserId)}`,
+      data: `action=explore_more&key=${encodeURIComponent(key)}&user=${encodeURIComponent(lineUserId)}`,
       displayText: '再 10 間'
     }
   };
 }
 
-// random 的「再選一間」
 export function randomMoreQuickItem(radius) {
   return {
     type: 'action',
