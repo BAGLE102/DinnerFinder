@@ -1,38 +1,31 @@
-import mongoose from 'mongoose'
-import config from './config.js'
+// config/mongo.js
+import mongoose from 'mongoose';
 
-
-export async function connectMongoDB() {
-  // 1) 從環境變數讀，**不要**在程式裡硬寫 URI
-  const uri = process.env.MONGO_URI;
-
-  if (!uri) {
-    console.error('MONGO_URI is missing.');
-    process.exit(1);
-  }
-
-  // 2) 事件監聽（方便排錯）
-  mongoose.connection.on('connected', () => {
-    console.log('=== MongoDB is connected ===');
-    console.log('DB name =', mongoose.connection.name); // ← 這行會印出目前使用的 DB
-  });
-
-  mongoose.connection.on('disconnected', () => {
-    console.log('=== MongoDB is disconnected ===');
-  });
-  mongoose.connection.on('close', () => {
-    console.log('=== MongoDB connection closed ===');
-  });
-  mongoose.connection.on('error', (error) => {
-    // 避免把整條 URI 打出來（遮住密碼）
-    console.error('=== MongoDB connection error ===');
-    console.error(error?.message || error);
-    process.exit(1);
-  });
-
-  // 3) 直接 connect：v7/8 不需要那些舊 options
-  // 如果你的 URI 已含 `/line_dinner`，就不要再另外指定 dbName
-  await mongoose.connect(uri);
+function mask(str = '') {
+  // mongodb+srv://user:pass@host/db?... → 遮掉帳密
+  return str.replace(/(mongodb\+srv:\/\/)([^:]+):([^@]+)@/i, (_, p, u) => `${p}${u}:****@`);
 }
 
-export default connectMongoDB;
+export default async function connectMongoDB() {
+  const uri = process.env.MONGO_URI;
+  if (!uri) throw new Error('MONGO_URI is missing');
+
+  // 看清楚用的 dbName（若你用 config.mongo.database 就帶進來）
+  const opts = {
+    dbName: process.env.MONGO_DB_NAME,  // 若你用環境變數控制，或保留原本傳的 dbName
+    useNewUrlParser: true,
+    useUnifiedTopology: true,
+    // autoIndex: true  // 初次建立索引時可打開
+  };
+
+  console.log('[Mongo] connecting to:', mask(uri), 'dbName=', opts.dbName || '(from URI)');
+  await mongoose.connect(uri, opts);
+
+  mongoose.connection.on('connected', () => {
+    console.log('=== MongoDB connected ===');
+    console.log('[Mongo] effective db name =', mongoose.connection.name); // ← 實際 DB 名
+  });
+  mongoose.connection.on('error', (err) => {
+    console.error('=== MongoDB error ===', err);
+  });
+}
