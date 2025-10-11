@@ -1,47 +1,17 @@
-import mongoose from 'mongoose'
-import coordinateSchema from './schema/coordinate.js'
+import mongoose from 'mongoose';
+const restaurantSchema = new mongoose.Schema({
+  ownerUserId: { type: String, index: true }, // 來自 getOwnerKey()
+  name: { type: String, index: true },
+  address: String,
+  placeId: { type: String, index: true },
+  location: { lat: Number, lng: Number },
+  rating: Number,
+  source: { type: String, enum: ['manual', 'places'], default: 'manual' },
+  timesChosen: { type: Number, default: 0 },
+  lastChosenAt: Date,
+}, { timestamps: true });
 
-const RestaurantSchema = new mongoose.Schema({
-  place_id: {
-    type: String,
-    unique: true,
-    required: true
-  },
-  name: {
-    type: String,
-    required: true
-  },
-  address: {
-    type: String,
-    required: true
-  },
-  location: {
-    type: coordinateSchema,
-    required: true
-  },
-  photo_url: {
-    type: String,
-    required: false
-  },
-  photo_attribution: {
-    type: String,
-    required: false
-  },
-  created_at: {
-    type: Number
-  },
-  updated_at: {
-    type: Number
-  }
-}, {
-  strict: 'throw',
-  timestamps: {
-    createdAt: 'created_at',
-    updatedAt: 'updated_at'
-  }
-})
-
-RestaurantSchema.index({ place_id: 1 }, { unique: true })
-RestaurantSchema.index({ location: '2dsphere' })
-
-export default mongoose.model('Restaurant', RestaurantSchema)
+restaurantSchema.index({ ownerUserId: 1, name: 1 }, { unique: true, sparse: true });
+const RestaurantModel = mongoose.models.Restaurant || mongoose.model('Restaurant', restaurantSchema);
+export const Restaurant = RestaurantModel;
+export default RestaurantModel;
