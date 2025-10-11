@@ -1,47 +1,16 @@
-import model from '../model/index.js'
-import { replyText, replyCarousel, viewActionFactory, updateLocationActionFactory, getMoreColumn, getQuickReply } from '../lib/replyHelper.js'
-import { calculateLatLngDistance } from '../lib/utils.js'
+// service/chooseRestaurant.js
+import Restaurant from '../model/restaurant.js';
 
-export default async function chooseRestaurant (replyToken, { userId, limit, offset, distance, joinCodes }) {
-  try {
-    const users = await model.User.find({ $or: [{ user_id: userId }, { join_code: joinCodes }] }).lean().exec()
-    const user = users.find((e) => (e.user_id === userId))
-    const placeIdOfUsersRestaurants = users.flatMap((e) => e.restaurants.map((r) => r.place_id))
-    const restaurants = await model.Restaurant.find({
-      place_id: placeIdOfUsersRestaurants,
-      location: {
-        $nearSphere: {
-          $geometry: {
-            type: 'Point',
-            coordinates: user.location.coordinates
-          },
-          $maxDistance: distance
-        }
-      }
-    }).skip(offset).limit(limit).lean().exec()
+export default async function chooseRestaurant(source, name) {
+  const ownerUserId = source?.groupId || source?.roomId || source?.userId;
+  if (!ownerUserId) return { ok: false, text: '來源不明，請在 1:1 視窗使用。' };
+  if (!name) return { ok: false, text: '請在「選擇」後面加店名，例如：選擇 八方雲集' };
 
-    if (!restaurants || restaurants.length === 0) {
-      if (offset === 0) {
-        const quickReply = getQuickReply([updateLocationActionFactory('距離遙遠？更新所在地')])
-        return replyText(replyToken, 'Oops，附近找不到喜愛的餐廳，可以嘗試看看增大搜索範圍或「探索餐廳」！', quickReply)
-      } else {
-        return replyText(replyToken, '已列出附近所有喜愛的餐廳，如果還是選不定可以嘗試看看增大搜索範圍或「探索餐廳」喔！')
-      }
-    }
+  const r = await Restaurant.findOne({ ownerUserId, name }).lean();
+  if (!r) return { ok: false, text: `找不到「${name}」，先用「新增 ${name}」加入清單吧～` };
 
-    let quickReply = null
-    if (offset === 0 && calculateLatLngDistance(
-      user.location.coordinates[1],
-      user.location.coordinates[0],
-      restaurants[0].location.coordinates[1],
-      restaurants[0].location.coordinates[0]
-    ) > 5000) {
-      quickReply = getQuickReply([updateLocationActionFactory('距離遙遠？更新所在地')])
-    }
+  await Restaurant.updateOne({ _id: r._id }, { $inc: { timesChosen: 1 }, $set: { lastChosenAt: new Date() } });
 
-    return replyCarousel(replyToken, restaurants, [viewActionFactory()], getMoreColumn('choose', limit, offset, distance, joinCodes), quickReply)
-  } catch (err) {
-    console.error(err)
-    throw new Error('Failed to get restaurants from database')
-  }
+  const addr = r.address ? `\n📍 ${r.address}` : '';
+  return { ok: true, text: `就決定是：${r.name}${addr}` };
 }
