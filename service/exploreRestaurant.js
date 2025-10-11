@@ -1,8 +1,8 @@
-// src/service/exploreRestaurant.js (Legacy Places API 版，default export)
+// src/service/exploreRestaurant.js
 import fetch from 'node-fetch';
 import User from '../model/user.js';
 
-// Haversine 距離（公尺）
+// ===== 小工具：Haversine 距離（公尺）=====
 function distMeters(a, b) {
   const toRad = d => (d * Math.PI) / 180;
   const R = 6371000;
@@ -11,17 +11,20 @@ function distMeters(a, b) {
   const s1 = Math.sin(dLat / 2);
   const s2 = Math.sin(dLng / 2);
   const A = s1 * s1 + Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * s2 * s2;
-  const C = 2 * Math.atan2(Math.sqrt(A), Math.sqrt(1 - A));
-  return Math.round(R * C);
+  const C = 2 * Math.atan2(Math.sqrt(Math.sqrt(A) * Math.sqrt(A)), Math.sqrt(1 - A)); // numerically stable
+  return Math.round(R * Math.acos(Math.max(-1, Math.min(1,
+    Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.cos(dLng) + Math.sin(toRad(a.lat)) * Math.sin(toRad(b.lat))
+  ))));
 }
 
+// fetch JSON
 async function fetchJson(url) {
   const r = await fetch(url);
   const data = await r.json().catch(() => ({}));
   return { ok: r.ok, status: r.status, data };
 }
 
-// 把 legacy results 正規化（含距離/照片）
+// 正規化結果（含距離/照片）並依距離排序 + 去重
 function normalizeResults(results, anchor) {
   const seen = new Set();
   const out = [];
@@ -40,10 +43,10 @@ function normalizeResults(results, anchor) {
       name,
       rating: p.rating,
       address: p.vicinity || p.formatted_address || '',
-      location: (lat!=null && lng!=null) ? { lat, lng } : undefined,
-      distance: (anchor && lat!=null && lng!=null) ? distMeters(anchor, { lat, lng }) : undefined,
-      photoReference: Array.isArray(p.photos) && p.photos[0]?.photo_reference
-        ? p.photos[0].photo_reference : undefined
+      location: (lat != null && lng != null) ? { lat, lng } : undefined,
+      distance: (anchor && lat != null && lng != null) ? distMeters(anchor, { lat, lng }) : undefined,
+      photoReference: Array.isArray(p.photos) && p.photos[0]?.photo_reference ? p.photos[0].photo_reference : undefined,
+      source: 'places'
     });
   }
   out.sort((a, b) => (a.distance ?? 0) - (b.distance ?? 0));
@@ -104,12 +107,14 @@ export default async function exploreRestaurant(lineUserId, radiusMeters = 1500,
     const gStatus = data?.status;
     const errorMessage = data?.error_message;
     const list = normalizeResults(data?.results, base);
-    debugSteps.push({ api: t.api, note: t.note, httpStatus: status, googleStatus: gStatus, errorMessage, count: list.length });
+    const nextPageToken = data?.next_page_token;
+    debugSteps.push({ api: t.api, note: t.note, httpStatus: status, googleStatus: gStatus, errorMessage, count: list.length, nextPageToken: !!nextPageToken });
 
     if (ok && gStatus === 'OK' && list.length) {
       return {
         ok: true,
         results: list.slice(0, limit),
+        nextPageToken, // ← 分頁用
         meta: { api: t.api, note: t.note, total: list.length, radiusUsed: radius },
         ...(debug ? { debug: debugSteps } : {})
       };
@@ -123,4 +128,37 @@ export default async function exploreRestaurant(lineUserId, radiusMeters = 1500,
 
   const text = `附近暫時找不到餐廳（半徑 ${radius}m）。\n可試試「探索 3000 / 5000」或換個位置。`;
   return { ok: false, text, ...(debug ? { debug: debugSteps } : {}) };
+}
+
+// 使用 legacy next_page_token 抓下一頁（自動等待 token 生效）
+export async function exploreByNextToken(lineUserId, nextPageToken, limit = 10) {
+  const user = await User.findOne({ lineUserId }).lean();
+  if (!user?.lastLocation) return { ok: false, text: '沒有你的所在位置，請先傳一則「位置訊息」。' };
+
+  const key = process.env.GOOGLE_API_KEY;
+  if (!key) return { ok: false, text: '未設定 GOOGLE_API_KEY。' };
+
+  // token 需要等 1~2 秒才會生效；最多嘗試 5 次
+  const url = new URL('https://maps.googleapis.com/maps/api/place/nearbysearch/json');
+  url.searchParams.set('pagetoken', nextPageToken);
+  url.searchParams.set('key', key);
+
+  for (let i = 0; i < 5; i++) {
+    const { ok, status, data } = await fetchJson(url.toString());
+    const gStatus = data?.status;
+    if (ok && gStatus === 'OK') {
+      const base = { lat: user.lastLocation.lat, lng: user.lastLocation.lng };
+      const list = normalizeResults(data?.results, base);
+      return {
+        ok: true,
+        results: list.slice(0, limit),
+        nextPageToken: data?.next_page_token || null
+      };
+    }
+    if (gStatus !== 'INVALID_REQUEST') {
+      return { ok: false, text: `Google 分頁失敗：${gStatus || status}` };
+    }
+    await new Promise(r => setTimeout(r, 1300)); // 等 token 生效
+  }
+  return { ok: false, text: 'Google 分頁逾時，請再點一次。' };
 }
