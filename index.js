@@ -1,30 +1,64 @@
-import 'dotenv/config.js';
+// src/index.js
 import express from 'express';
 import line from '@line/bot-sdk';
+import mongoose from 'mongoose';
+
 import connectMongoDB from './config/mongo.js';
 import controller from './controller/index.js';
-import mongoose from 'mongoose';
+
+// 供 /db-info 與 /explore-debug 使用（只 import 一次）
 import User from './model/user.js';
 import Restaurant from './model/restaurant.js';
+import exploreRestaurant from './service/exploreRestaurant.js';
 
 const config = {
   channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN,
   channelSecret: process.env.LINE_CHANNEL_SECRET
 };
 const client = new line.Client(config);
-
 const app = express();
 
 // 健康檢查
 app.get('/health', (_req, res) => res.status(200).send('OK'));
 
-// 方便你檢查 DB 名與筆數
+// DB 資訊（方便你確認 DB 名與筆數）
 app.get('/db-info', async (_req, res) => {
   const admin = mongoose.connection.db.admin();
   const ping = await admin.ping();
   const users = await User.countDocuments();
   const rests = await Restaurant.countDocuments();
-  res.json({ ok: true, dbName: mongoose.connection.name, counts: { users, restaurants: rests }, ping });
+  res.json({
+    ok: true,
+    dbName: mongoose.connection.name,
+    counts: { users, restaurants: rests },
+    ping
+  });
+});
+
+// 探索除錯：在瀏覽器看 Google 回傳與整理後的結果
+// GET /explore-debug?radius=3000&limit=20&user=Uxxxx（user 可省略，會抓最近有位置的）
+app.get('/explore-debug', async (req, res) => {
+  try {
+    const radius = Number(req.query.radius) || 1500;
+    const limit = Number(req.query.limit) || 10;
+    let lineUserId = req.query.user;
+
+    if (!lineUserId) {
+      const u = await User.findOne({ 'lastLocation.lat': { $exists: true } })
+        .sort({ 'lastLocation.updatedAt': -1 })
+        .lean();
+      if (u) lineUserId = u.lineUserId;
+    }
+    if (!lineUserId) {
+      return res.status(400).json({ ok: false, error: '找不到任何 lastLocation，請先在 LINE 傳一則位置訊息' });
+    }
+
+    const out = await exploreRestaurant(lineUserId, radius, { debug: true, limit });
+    res.json(out);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ ok: false, error: e.message });
+  }
 });
 
 // LINE webhook
@@ -48,33 +82,3 @@ async function handleEvent(event) {
 await connectMongoDB();
 const port = process.env.PORT || 10000;
 app.listen(port, () => console.log(`listening on ${port}`));
-// src/index.js（節錄）
-import exploreRestaurant from './service/exploreRestaurant.js';
-import User from './model/user.js';
-
-// ...既有的 /health /db-info 之後，加上：
-app.get('/explore-debug', async (req, res) => {
-  try {
-    const radius = Number(req.query.radius) || 1500;
-    const limit = Number(req.query.limit) || 10;
-    let lineUserId = req.query.user;
-
-    // 若沒指定 user，就取最近一次有上傳位置的使用者
-    if (!lineUserId) {
-      const u = await User.findOne({ 'lastLocation.lat': { $exists: true } })
-        .sort({ 'lastLocation.updatedAt': -1 })
-        .lean();
-      if (u) lineUserId = u.lineUserId;
-    }
-    if (!lineUserId) {
-      return res.status(400).json({ ok: false, error: '找不到任何 lastLocation，請先在 LINE 傳一則位置訊息' });
-    }
-
-    const out = await exploreRestaurant(lineUserId, radius, { debug: true, limit });
-    res.json(out);
-  } catch (e) {
-    console.error(e);
-    res.status(500).json({ ok: false, error: e.message });
-  }
-});
-
