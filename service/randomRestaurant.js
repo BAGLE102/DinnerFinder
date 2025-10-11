@@ -1,4 +1,3 @@
-// service/randomRestaurant.js
 import fetch from 'node-fetch';
 import User from '../model/user.js';
 import Restaurant from '../model/restaurant.js';
@@ -17,6 +16,7 @@ async function sampleOne(ownerUserId) {
 async function pickFromPlaces(last, radius = 1500) {
   const key = process.env.GOOGLE_API_KEY;
   if (!key) return null;
+
   const url = new URL('https://maps.googleapis.com/maps/api/place/nearbysearch/json');
   url.searchParams.set('location', `${last.lat},${last.lng}`);
   url.searchParams.set('radius', String(radius));
@@ -45,19 +45,18 @@ export default async function randomRestaurant(source) {
   const ownerUserId = source?.groupId || source?.roomId || source?.userId;
   if (!ownerUserId) return { ok: false, text: '來源不明，請在 1:1 視窗使用。' };
 
-  // 先從自己的清單抽
+  // 先抽自己的清單
   const picked = await sampleOne(ownerUserId);
   if (picked) {
     const addr = picked.address ? `\n📍 ${picked.address}` : '';
     return { ok: true, text: `今天就吃：${picked.name}${addr}`, restaurant: picked };
   }
 
-  // 清單為空 → 可選擇用 Google Places 當候補
+  // 清單空 → 用附近候補
   if (!USE_PLACES_FALLBACK_WHEN_EMPTY) {
     return { ok: false, text: '清單沒有餐廳，先用「新增 店名」加幾家吧～' };
   }
 
-  // 走附近候補要看使用者 lastLocation（不是 user.location）
   const lineUserId = source?.userId || ownerUserId;
   const user = await User.findOne({ lineUserId }).lean();
   const last = user?.lastLocation;
