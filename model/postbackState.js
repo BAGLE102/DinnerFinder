@@ -1,47 +1,41 @@
-// src/model/postbackState.js
+// model/postbackState.js
 import crypto from 'crypto';
-import mongoose from 'mongoose';
+import { getDb } from '../config/mongo.js';
 
-function col() {
-  const db = mongoose.connection?.db;
-  if (!db) throw new Error('[postbacks] MongoDB not connected yet');
-  return db.collection('postbacks');
+const COLL = 'postback_state';
+
+async function ensureIndexes(db) {
+  await db.collection(COLL).createIndex({ userId: 1, sid: 1 }, { unique: true });
+  await db.collection(COLL).createIndex({ expireAt: 1 }, { expireAfterSeconds: 0 });
 }
 
-// 產生短 key（URL-safe）
-function genKey(len = 10) {
-  return crypto
-    .randomBytes(8)
-    .toString('base64')
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/,'')
-    .slice(0, len);
+function makeSid(len = 10) {
+  // 短、小於 20 bytes，URL 安全
+  return crypto.randomBytes(Math.ceil(len * 0.75)).toString('base64url').slice(0, len);
 }
 
-export async function ensurePostbackIndexes() {
-  const c = col();
-  await c.createIndex({ key: 1 }, { unique: true, name: 'key_unique' });
-  // TTL：10 分鐘自動過期
-  await c.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0, name: 'ttl_expiresAt' });
-}
-
-export async function savePostback(payload, { userId, ttlSec = 600 } = {}) {
-  const c = col();
-  const key = genKey();
+export async function saveState(userId, payload, ttlSec = 900) {
+  const db = getDb();
+  await ensureIndexes(db);
+  const sid = makeSid(12);
   const doc = {
-    key,
-    userId: userId || null,
-    payload,                        // { type, nextPageToken, radius, ... }
+    userId,
+    sid,
+    payload,                     // 任何你想存的東西（token / 查詢條件 / 隨機條件）
+    expireAt: new Date(Date.now() + ttlSec * 1000),
     createdAt: new Date(),
-    expiresAt: new Date(Date.now() + ttlSec * 1000),
   };
-  await c.insertOne(doc);
-  return key;
+  await db.collection(COLL).insertOne(doc);
+  return sid;
 }
 
-export async function loadPostback(key) {
-  const c = col();
-  const doc = await c.findOne({ key });
-  return doc ? doc.payload : null;
+export async function loadState(userId, sid) {
+  const db = getDb();
+  const doc = await db.collection(COLL).findOne({ userId, sid });
+  return doc?.payload || null;
+}
+
+export async function deleteState(userId, sid) {
+  const db = getDb();
+  await db.collection(COLL).deleteOne({ userId, sid });
 }
