@@ -1,4 +1,3 @@
-// service/exploreRestaurant.js
 import fetch from 'node-fetch';
 import User from '../model/user.js';
 
