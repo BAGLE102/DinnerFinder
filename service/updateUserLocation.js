@@ -1,22 +1,25 @@
-import model from '../model/index.js'
-import { replyLocation } from '../lib/replyHelper.js'
+// service/updateUserLocation.js
+import mongoose from 'mongoose';
+import User from '../model/user.js';
 
-export default async function (replyToken, { userId, address, latitude, longitude }) {
-  const filter = { user_id: userId }
-  const params = {
-    address,
-    location: {
-      type: 'Point',
-      coordinates: [longitude, latitude]
-    }
+export default async function updateUserLocation(event) {
+  if (event.message?.type !== 'location') {
+    return { ok: false, text: '請傳送 LINE 內建的「位置訊息」。' };
   }
+  const lineUserId = event.source?.userId;
+  const lat = event.message.latitude;
+  const lng = event.message.longitude;
 
-  try {
-    await model.User.updateOne(filter, params)
-    console.log('Update user location successfully')
-    return replyLocation(replyToken, '所在地更新成功！', address, latitude, longitude)
-  } catch (err) {
-    console.error(err)
-    throw new Error('Failed to update user location')
-  }
+  const ret = await User.updateOne(
+    { lineUserId },
+    { $set: { lastLocation: { lat, lng, updatedAt: new Date() } } },
+    { upsert: true }
+  );
+
+  console.log('[UpdateUserLocation] db=', mongoose.connection.name,
+              'coll=', User.collection.name,
+              'filter=', { lineUserId },
+              'result=', ret);
+
+  return { ok: true, text: 'Update user location successfully' };
 }
