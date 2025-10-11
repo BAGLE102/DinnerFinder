@@ -1,9 +1,5 @@
-import follow from './follow.js'
-import message from './message.js'
-import postback from './postback.js'
+import message from './message.js';
+import postback from './postback.js';
+import follow from './follow.js';
 
-export default {
-  follow,
-  message,
-  postback
-}
+export default { message, postback, follow };
