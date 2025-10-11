@@ -14,7 +14,9 @@ export async function connectMongoDB() {
   // 2) 事件監聽（方便排錯）
   mongoose.connection.on('connected', () => {
     console.log('=== MongoDB is connected ===');
+    console.log('DB name =', mongoose.connection.name); // ← 這行會印出目前使用的 DB
   });
+
   mongoose.connection.on('disconnected', () => {
     console.log('=== MongoDB is disconnected ===');
   });
