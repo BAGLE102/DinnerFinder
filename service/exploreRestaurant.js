@@ -1,7 +1,7 @@
 // src/service/exploreRestaurant.js
 import fetch from 'node-fetch';
 import User from '../model/user.js';
-
+import { savePostback } from '../model/postbackState.js';
 // ===== 小工具：Haversine 距離（公尺）=====
 function distMeters(a, b) {
   const toRad = d => (d * Math.PI) / 180;
@@ -162,3 +162,30 @@ export async function exploreByNextToken(lineUserId, nextPageToken, limit = 10) 
   }
   return { ok: false, text: 'Google 分頁逾時，請再點一次。' };
 }
+// 如果還有下一頁：把 next_page_token 存 DB，產生短 key
+if (apiRes.next_page_token) {
+  const key = await savePostback({
+    type: 'explore_more',
+    nextPageToken: apiRes.next_page_token,
+    radius,          // 繼承使用者剛選的半徑
+    keyword,         // 如果你有關鍵字
+    lat, lng,        // 目前使用者座標
+  }, { userId: user.lineUserId, ttlSec: 600 });
+
+  quickItems.push({
+    type: 'action',
+    action: {
+      type: 'postback',
+      label: '再 10 間',
+      data: `action=explore_more&key=${key}`,   // <= 短到安全（<300 chars）
+      displayText: '再 10 間'
+    }
+  });
+}
+
+await client.replyMessage(event.replyToken, {
+  type: 'flex',
+  altText: `找到 ${total} 家餐廳`,
+  contents: restaurantsCarousel(results.slice(0, 10)), // 最高 10 個
+  quickReply: { items: quickItems }
+});
