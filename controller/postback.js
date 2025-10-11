@@ -12,24 +12,7 @@ function parseKV(str) {
   for (const [k, v] of p.entries()) o[k] = v;
   return o;
 }
-// controller/postback.js（只示範 handler 片段）
-import exploreRestaurant, { resolveMoreKey } from '../service/exploreRestaurant.js';
-import { reply } from '../config/line.js';
 
-case 'explore_more': {
-  const key = data.k || data.key; // 兼容
-  const rec = resolveMoreKey(key); // { token, params:{lat,lng,radius} } or null
-  if (!rec) {
-    await reply(replyToken, { type: 'text', text: '清單已過期，請再打一次「探索 1500/3000/5000」' });
-    break;
-  }
-  const msg = await exploreRestaurant({
-    ...rec.params,
-    pageToken: rec.token,
-  });
-  await reply(replyToken, msg);
-  break;
-}
 
 export default async function handlePostback(event) {
   const userId = event.source?.userId;
@@ -51,6 +34,20 @@ export default async function handlePostback(event) {
           places, nextPageToken: next2
         });
         break;
+      }
+        case 'explore_more': {
+          const key = data.k || data.key; // 兼容
+          const rec = resolveMoreKey(key); // { token, params:{lat,lng,radius} } or null
+          if (!rec) {
+            await reply(replyToken, { type: 'text', text: '清單已過期，請再打一次「探索 1500/3000/5000」' });
+            break;
+          }
+          const msg = await exploreRestaurant({
+            ...rec.params,
+            pageToken: rec.token,
+          });
+          await reply(replyToken, msg);
+          break;
       }
       case 'rng': { // random again
         const st = await loadState(userId, data.id);
