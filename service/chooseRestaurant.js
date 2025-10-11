@@ -1,4 +1,3 @@
-// service/chooseRestaurant.js
 import Restaurant from '../model/restaurant.js';
 
 export default async function chooseRestaurant(source, name) {
