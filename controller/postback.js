@@ -1,53 +1,67 @@
 // controller/postback.js
-import { URLSearchParams } from 'url';
-import { addRestaurantToUser } from '../service/user.js';
-import { exploreByNextToken } from '../service/exploreRestaurant.js';
-import randomRestaurant from '../service/randomRestaurant.js';
+import { loadState, deleteState } from '../model/postbackState.js';
+import { sendExplore, sendRandom } from '../service/exploreRestaurant.js';
+import { searchNearby, searchNextPage } from '../service/placesSearch.js'; // 你原本封裝 Google 的兩個方法
+import { client as lineClient } from '../config/line.js';
+import { getDb } from '../config/mongo.js';
 
-export default async function onPostback(event, client) {
-  const replyToken = event.replyToken;
+function parseKV(str) {
+  // "a=em&id=xxxx&pid=yyy" -> { a:'em', id:'xxxx', pid:'yyy' }
+  const p = new URLSearchParams(str || '');
+  const o = {};
+  for (const [k, v] of p.entries()) o[k] = v;
+  return o;
+}
+
+export default async function handlePostback(event) {
   const userId = event.source?.userId;
-
-  // data 是 querystring 形式：action=add&place_id=xxx&name=yyy
-  const dataQs = new URLSearchParams(event.postback?.data || '');
-  const action = dataQs.get('action');
+  const replyToken = event.replyToken;
+  const data = parseKV(event.postback?.data || '');
 
   try {
-    switch (action) {
-      case 'explore_more': {
-        const token = dataQs.get('token') || dataQs.get('key');
-        const uid = dataQs.get('user') || userId;
-        if (!token) {
-          return client.replyMessage(replyToken, { type: 'text', text: '沒有下一頁 token，可再探索一次～' });
+    switch (data.a) {
+      case 'em': { // explore_more
+        const st = await loadState(userId, data.id);
+        if (!st) {
+          await lineClient.replyMessage(replyToken, [{ type: 'text', text: '頁面已過期，請再打「探索 1500」' }]);
+          return;
         }
-        return exploreByNextToken(client, replyToken, uid, token);
+        const { lat, lng, radius, nextPageToken } = st;
+        const { places, nextPageToken: next2 } = await searchNextPage(nextPageToken);
+        await sendExplore({
+          replyToken, userId, lat, lng, radius,
+          places, nextPageToken: next2
+        });
+        break;
       }
-
-      case 'add': {
-        const placeId = dataQs.get('place_id');
-        const name = dataQs.get('name') ? decodeURIComponent(dataQs.get('name')) : '這間';
-        if (!placeId) {
-          return client.replyMessage(replyToken, { type: 'text', text: '找不到這間的 place_id，無法加入。' });
+      case 'rng': { // random again
+        const st = await loadState(userId, data.id);
+        if (!st) {
+          await lineClient.replyMessage(replyToken, [{ type: 'text', text: '抽選條件已過期，請再打「隨機」' }]);
+          return;
         }
-        await addRestaurantToUser(userId, placeId);
-        return client.replyMessage(replyToken, { type: 'text', text: `已加入清單：${name}` });
+        const { lat, lng, radius } = st;
+        const { places } = await searchNearby({ lat, lng, radius });
+        await sendRandom({ replyToken, userId, lat, lng, radius, places });
+        break;
       }
-
       case 'choose': {
-        const name = dataQs.get('name') ? decodeURIComponent(dataQs.get('name')) : '這間';
-        return client.replyMessage(replyToken, { type: 'text', text: `今天就吃：${name} 🎉` });
+        const pid = data.pid;
+        // TODO: 依 pid 寫入你「今天就吃這間」或建立 order，這裡只回個字
+        await lineClient.replyMessage(replyToken, [{ type: 'text', text: '已選擇這間！' }]);
+        break;
       }
-
-      case 'random_again': {
-        const radius = parseInt(dataQs.get('radius') || '1500', 10);
-        return randomRestaurant(client, replyToken, userId, radius);
+      case 'add': {
+        const pid = data.pid;
+        // TODO: 依 pid 加入清單
+        await lineClient.replyMessage(replyToken, [{ type: 'text', text: '已加入你的清單！' }]);
+        break;
       }
-
       default:
-        return client.replyMessage(replyToken, { type: 'text', text: '我不太懂這個按鈕的意思 😅' });
+        await lineClient.replyMessage(replyToken, [{ type: 'text', text: '操作無效或已過期，請重新探索。' }]);
     }
-  } catch (e) {
-    console.error('[Postback error]', e);
-    return client.replyMessage(replyToken, { type: 'text', text: '操作失敗了，等一下再試一次！' });
+  } catch (err) {
+    console.error('[postback] error', err);
+    await lineClient.replyMessage(replyToken, [{ type: 'text', text: '出錯了，我再修一下 QQ' }]);
   }
 }
