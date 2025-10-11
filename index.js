@@ -1,72 +1,50 @@
-// index.js
-import * as line from '@line/bot-sdk';
+import 'dotenv/config.js';
 import express from 'express';
-
-// 注意：這裡用 ./config/...（沒有 src）
+import line from '@line/bot-sdk';
 import connectMongoDB from './config/mongo.js';
-import config from './config/config.js';
 import controller from './controller/index.js';
+import mongoose from 'mongoose';
+import User from './model/user.js';
+import Restaurant from './model/restaurant.js';
+
+const config = {
+  channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN,
+  channelSecret: process.env.LINE_CHANNEL_SECRET
+};
+const client = new line.Client(config);
 
 const app = express();
 
-/* ---- Health：放最上面，回最簡單，讓 Render 健檢穩過 ---- */
-app.get('/health', (_req, res) => {
-  res.set('Cache-Control', 'no-store');
-  res.type('text/plain').status(200).send('ok');
-});
-app.head('/health', (_req, res) => res.status(200).end());
-/* ------------------------------------------------------------------ */
+// 健康檢查
+app.get('/health', (_req, res) => res.status(200).send('OK'));
 
-/* ---- LINE Webhook：先回 200，再背景處理，避免 Verify/Probe 逾時 ---- */
-app.post(
-  '/callback',
-  line.middleware({
-    channelAccessToken: config.line.channelAccessToken,
-    channelSecret: config.line.channelSecret
-  }),
-  (req, res) => {
-    res.status(200).end(); // 立刻回覆
-    const events = Array.isArray(req.body?.events) ? req.body.events : [];
-    Promise.all(events.map(handleEvent)).catch(console.error);
-  }
-);
-/* ------------------------------------------------------------------ */
-
-// 其餘中介層與路由在 webhook 後面再加（避免影響 LINE 驗簽）
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-
-// DB ping（選用）
-import mongoose from 'mongoose';
-app.get('/db-ping', async (_req, res) => {
-  try {
-    const pong = await mongoose.connection.db.admin().ping(); // { ok: 1 }
-    res.json({ ok: true, ping: pong });
-  } catch (e) {
-    res.status(500).json({ ok: false, error: e.message });
-  }
+// 方便你檢查 DB 名與筆數
+app.get('/db-info', async (_req, res) => {
+  const admin = mongoose.connection.db.admin();
+  const ping = await admin.ping();
+  const users = await User.countDocuments();
+  const rests = await Restaurant.countDocuments();
+  res.json({ ok: true, dbName: mongoose.connection.name, counts: { users, restaurants: rests }, ping });
 });
 
-// 事件處理
-function handleEvent(event) {
-  switch (event?.type) {
-    case 'follow':  return controller.follow(event);
-    case 'message': return controller.message(event);
-    case 'postback':return controller.postback(event);
-    default:        return Promise.resolve(null);
-  }
+// LINE webhook
+app.post('/callback', line.middleware(config), (req, res) => {
+  Promise.all(req.body.events.map(handleEvent))
+    .then(result => res.json(result))
+    .catch(err => {
+      console.error(err);
+      res.status(500).end();
+    });
+});
+
+async function handleEvent(event) {
+  if (event.type === 'message')  return controller.message(client, event);
+  if (event.type === 'postback') return controller.postback(client, event);
+  if (event.type === 'follow')   return controller.follow(client, event);
+  return Promise.resolve(null);
 }
 
-// 啟動（Render 會注入 PORT）
-const PORT = process.env.PORT || config.app?.port || 3000;
-
-connectMongoDB()
-  .then(() => {
-    app.listen(PORT, '0.0.0.0', () => {
-      console.log(`listening on ${PORT}`);
-    });
-  })
-  .catch((e) => {
-    console.error('Failed to connect MongoDB:', e?.message || e);
-    process.exit(1);
-  });
+// 啟動
+await connectMongoDB();
+const port = process.env.PORT || 10000;
+app.listen(port, () => console.log(`listening on ${port}`));
