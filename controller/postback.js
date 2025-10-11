@@ -35,7 +35,7 @@ export default async function handlePostback(event) {
         });
         break;
       }
-        case 'explore_more': {
+      case 'explore_more': {
           const key = data.k || data.key; // 兼容
           const rec = resolveMoreKey(key); // { token, params:{lat,lng,radius} } or null
           if (!rec) {
