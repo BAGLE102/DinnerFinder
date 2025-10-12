@@ -1,6 +1,6 @@
 // service/cachePlaces.js
 import { getDb } from '../config/mongo.js';
-import { fetchNearbyPlaces } from './placesSearch.js';
+import { searchNearby } from './placesSearch.js';
 
 const GRID_STEP = 0.01; // ~1.1km
 const STALE_MS = 1000 * 60 * 60 * 12; // 12 小時視為舊資料
