@@ -4,7 +4,6 @@ import config from '../config/config.js';
 
 
 export async function searchNearby({ lat, lng, radius }) {
-  const url = 'https://maps.googleapis.com/maps/api/place/nearbysearch/json';
   const params = {
     location: `${lat},${lng}`,
     radius,
@@ -12,18 +11,30 @@ export async function searchNearby({ lat, lng, radius }) {
     key: config.GOOGLE_API_KEY
   };
 
-  const res = await axios.get(url, { params });
-  const results = res.data.results || [];
+  try {
+    const res = await axios.get('https://maps.googleapis.com/maps/api/place/nearbysearch/json', { params });
+    const rawResults = res.data.results || [];
 
-  return results.slice(0, 20).map(r => ({
-    id: r.place_id,
-    name: r.name,
-    rating: r.rating,
-    address: r.vicinity,
-    photoUrl: r.photos?.[0]
-      ? `https://maps.googleapis.com/maps/api/place/photo?maxwidth=1200&photo_reference=${r.photos[0].photo_reference}&key=${config.GOOGLE_API_KEY}`
-      : null,
-    mapUrl: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(r.name)}&query_place_id=${r.place_id}`,
-    distance: r.distance_meters || 0
-  }));
+    // 過濾出 restaurant/food 類型，避免學校、ATM 等誤入
+    const filtered = rawResults.filter(place =>
+      (place.types?.includes('restaurant') || place.types?.includes('food')) &&
+      place.name && place.place_id
+    );
+
+    // 整理成你要的格式
+    return filtered.map(p => ({
+      id: p.place_id,
+      name: p.name,
+      rating: p.rating || null,
+      address: p.vicinity || p.formatted_address || null,
+      distance: p.distance_meters || null,
+      photoUrl: (p.photos?.[0]?.photo_reference?.length < 200)
+        ? `https://maps.googleapis.com/maps/api/place/photo?maxwidth=1200&photo_reference=${p.photos[0].photo_reference}&key=${config.GOOGLE_API_KEY}`
+        : null,
+      mapUrl: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(p.name)}&query_place_id=${p.place_id}`
+    }));
+  } catch (err) {
+    console.error('❌ fetchNearbyPlaces error:', err.message);
+    return [];
+  }
 }
