@@ -50,7 +50,7 @@ export default async function handleMessage(event) {
     const loc = userLoc.get(userId) || defaultLoc;
     const radius = 1500;
     const { places, source } = await getPlacesCached({ ...loc, radius });
-    const msg = buildRandomMessage(places);
+    const msg = buildRandomMessage(places.slice(0, 10));
     await lineClient.replyMessage(replyToken, [msg]);
     console.log(`[random] ${source} key, total=${places.length}`);
     return;
