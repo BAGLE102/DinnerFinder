@@ -3,7 +3,7 @@ import axios from 'axios';
 import config from '../config/config.js';
 
 
-export async function fetchNearbyPlaces({ lat, lng, radius }) {
+export async function searchNearby({ lat, lng, radius }) {
   const url = 'https://maps.googleapis.com/maps/api/place/nearbysearch/json';
   const params = {
     location: `${lat},${lng}`,
