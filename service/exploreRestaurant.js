@@ -3,14 +3,14 @@ import { client as lineClient } from '../config/line.js';
 import { saveState } from '../model/postbackState.js';
 import { shortId } from '../util/id.js';
 
-const MAX_BUBBLES = 10;
-const MAX_ALT = 400;
+const MAX_BUBBLES = 10;   // LINE Flex carousel 最多 10
+const MAX_ALT = 400;      // 安全上限（實務上 300~400 內較穩）
 
 const safeText = (s, fallback = '') =>
   (typeof s === 'string' && s.trim().length ? s.trim() : fallback);
 
 const safeKmOrM = (m) => {
-  if (!m || Number.isNaN(Number(m))) return '距離未知';
+  if (m === null || m === undefined || Number.isNaN(Number(m))) return '距離未知';
   const n = Number(m);
   return n >= 1000 ? `${(n / 1000).toFixed(1)} km` : `${Math.round(n)} m`;
 };
@@ -22,13 +22,28 @@ const validHttps = (url) => {
   } catch { return null; }
 };
 
+const ellipsis = (s = '', max = 60) => {
+  const t = String(s);
+  return t.length > max ? t.slice(0, max) + '…' : t;
+};
+
 const toBubbles = (places = []) => {
   return places.slice(0, MAX_BUBBLES).map((p) => {
-    const id = safeText(p.id, '');
-    const safeName = safeText(p.name, '未命名');
-    const safeAddress = safeText(p.address, '地址不詳');
+    // 1) 確保 postback data 不為空（LINE 規格 1~300 bytes）
+    const id = safeText(p.id) || `p_${shortId(8)}`;
+
+    const rawName = safeText(p.name, '未命名');
+    const safeName = ellipsis(rawName, 50);
+
+    const rawAddr = safeText(p.address, '地址不詳');
+    const safeAddress = ellipsis(rawAddr, 60);
+
     const safeDistance = safeKmOrM(p.distance);
+
+    // 2) 顯示分數（可為 0）
     const ratingText = (p.rating || p.rating === 0) ? `⭐ ${p.rating}` : null;
+
+    // 3) URL 僅接收 https（避免 400）
     const photoUrl = p.photoUrl ? validHttps(p.photoUrl) : null;
     const mapUrl = p.mapUrl ? validHttps(p.mapUrl) : null;
 
@@ -54,7 +69,7 @@ const toBubbles = (places = []) => {
         action: {
           type: 'postback',
           label: '就吃這間',
-          data: `a=choose&id=${id}`,
+          data: `a=choose&id=${encodeURIComponent(id)}`,
           displayText: `就吃 ${safeName}`
         }
       },
@@ -65,7 +80,7 @@ const toBubbles = (places = []) => {
         action: {
           type: 'postback',
           label: '加入清單',
-          data: `a=add&id=${id}`,
+          data: `a=add&id=${encodeURIComponent(id)}`,
           displayText: `加入 ${safeName}`
         }
       },
@@ -113,9 +128,10 @@ export async function sendExplore({
     return;
   }
 
+  // 「再 10 間」：把長 token 存 state，用短碼放入 postback data
   let moreQR = null;
   if (nextPageToken) {
-    const id = shortId(8);
+    const id = shortId(8); // 短碼
     await saveState(user.id, id, { lat, lng, radius, nextPageToken });
     moreQR = {
       type: 'action',
@@ -135,7 +151,7 @@ export async function sendExplore({
 
   const message = {
     type: 'flex',
-    altText: clampAlt(`找到 ${bubbles.length} 家餐廳`),
+    altText: clampAlt(`找到 ${bubbles.length} 家餐廳`), // 不再顯示 20，與實際送出的 10 對齊
     contents: { type: 'carousel', contents: bubbles },
     quickReply: { items: quickReplyItems }
   };
@@ -159,7 +175,7 @@ export async function sendRandom({ replyToken, userId, lat, lng, radius, places 
   const msg = {
     type: 'flex',
     altText: clampAlt(`抽到了：${safeText(pick.name, '未命名')}`),
-    contents: bubble,
+    contents: bubble, // LINE Flex 支援直接放單一 bubble
     quickReply: {
       items: [
         { type: 'action', action: { type: 'postback', label: '再抽一次', data: `a=rng&id=${id}`, displayText: '再抽一次' } },
