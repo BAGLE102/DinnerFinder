@@ -1,34 +1,55 @@
-// service/places.js
-import axios from 'axios';
+const axios = require('axios');
 
-const GOOGLE_KEY = process.env.GOOGLE_MAPS_API_KEY;
-const sleep = (ms) => new Promise(r => setTimeout(r, ms));
-
-export async function nearbySearch({ lat, lng, radius, pagetoken }) {
-  if (!GOOGLE_KEY) throw new Error('GOOGLE_MAPS_API_KEY is required');
-
-  const params = new URLSearchParams({ key: GOOGLE_KEY, language: 'zh-TW' });
-
-  if (pagetoken) {
-    // Google Places next_page_token 需要延遲 ~2 秒才會生效
-    await sleep(2000);
-    params.set('pagetoken', pagetoken);
-  } else {
-    params.set('location', `${lat},${lng}`);
-    params.set('radius', String(radius));
-    params.set('type', 'restaurant');
-  }
-
-  const url = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?${params.toString()}`;
-  const { data } = await axios.get(url);
-  return data; // { results, next_page_token, status, ... }
+const { GOOGLE_API_KEY } = process.env;
+if (!GOOGLE_API_KEY) {
+  console.error('Missing GOOGLE_API_KEY');
+  process.exit(1);
 }
 
-// === 新增這兩個 named exports，讓 controller 可直接用 ===
-export async function searchNearby({ lat, lng, radius }) {
-  return nearbySearch({ lat, lng, radius });
+async function searchNearby({ lat, lng, radius, nextPageToken }) {
+  const params = nextPageToken
+    ? { pagetoken: nextPageToken, key: GOOGLE_API_KEY }
+    : {
+        location: `${lat},${lng}`,
+        radius,
+        type: 'restaurant',
+        language: 'zh-TW',
+        key: GOOGLE_API_KEY,
+      };
+  const url = 'https://maps.googleapis.com/maps/api/place/nearbysearch/json';
+  const { data } = await axios.get(url, { params });
+  // 取前 10 個即可（保守）
+  const list = (data.results || []).slice(0, 10).map(normalizePlace);
+  return { results: list, nextPageToken: data.next_page_token || null };
 }
 
-export async function getNextPage({ pagetoken }) {
-  return nearbySearch({ pagetoken });
+function normalizePlace(p) {
+  if (!p) return {};
+  const lat = p.geometry?.location?.lat;
+  const lng = p.geometry?.location?.lng;
+  return {
+    place_id: p.place_id,
+    name: p.name,
+    rating: p.rating ? `⭐ ${p.rating}` : '',
+    address: p.vicinity || p.formatted_address || '',
+    photoRef: p.photos?.[0]?.photo_reference || '',
+    photoUrl: p.photos?.[0]?.photo_reference
+      ? `https://maps.googleapis.com/maps/api/place/photo?maxwidth=1200&photo_reference=${p.photos[0].photo_reference}&key=${GOOGLE_API_KEY}`
+      : '',
+    lat, lng,
+    mapUrl: p.place_id
+      ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(p.name)}&query_place_id=${p.place_id}`
+      : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(p.name)}`,
+  };
 }
+
+function pickOne(arr) {
+  if (!arr?.length) return null;
+  return arr[Math.floor(Math.random() * arr.length)];
+}
+
+module.exports = {
+  searchNearby,
+  pickOne,
+  normalizePlace,
+};
