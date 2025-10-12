@@ -112,69 +112,118 @@ function buildFlexMessage(bubbles, altText, quickReply) {
   return msg;
 }
 
-function buildMoreQuickReply(userId, params) {
+function buildMoreQuickReply(stateId) {
+  const data = `a=em&id=${stateId}`; // controller/postback 解析的 key
+  // 安全檢查：LINE postback.data 限制 ~300 bytes
+  if (Buffer.byteLength(data) > 300) {
+    console.warn('[buildMoreQuickReply] postback data too long, trimming');
+  }
   return {
     items: [
-      { type: 'action', action: { type: 'message', label: '探索 1500', text: '探索 1500' } },
-      { type: 'action', action: { type: 'message', label: '探索 3000', text: '探索 3000' } },
-      { type: 'action', action: { type: 'message', label: '探索 5000', text: '探索 5000' } },
-      { type: 'action', action: { type: 'message', label: '隨機', text: '隨機' } },
-      { type: 'action', action: { type: 'message', label: '我的餐廳', text: '我的餐廳' } },
-      { type: 'action', action: { type: 'location', label: '傳位置' } },
-      // 「再 10 間」=> 把 nextPageToken 存 DB，postback.data 只放短 id，避免超過 300 bytes
       {
         type: 'action',
         action: {
           type: 'postback',
           label: '再 10 間',
-          data: `a=em&id=${params.stateId}`, // 短
-          displayText: '再 10 間',
-        },
+          data,
+          displayText: '再 10 間'
+        }
       },
-    ],
+      { type: 'action', action: { type: 'message', label: '隨機', text: '隨機' } },
+      { type: 'action', action: { type: 'location', label: '傳位置' } },
+    ]
   };
 }
 
+
 export async function sendExplore({ replyToken, userId, lat, lng, radius, places, nextPageToken }) {
   const bubbles = (places || []).map((p) => buildBubble(p, { lat, lng }));
-  const groups = chunk(bubbles, 10); // 每組 <= 10
+  const groups = chunk(bubbles, 10); // 1 則 Flex 最多 10 個 bubble
 
-  console.log(`[explore] totalPlaces=${places?.length || 0}, groups=${groups.length}, hasNext=${!!nextPageToken}`);
+  console.log(`[sendExplore] places=${places?.length || 0}, groups=${groups.length}, hasNext=${!!nextPageToken}`);
+
+  // 先存下一頁 token，避免在迴圈裡 await 造成語法/執行問題
+  let stateId = null;
+  if (nextPageToken) {
+    try {
+      stateId = await saveState(userId, { lat, lng, radius, nextPageToken });
+    } catch (e) {
+      console.error('[sendExplore] saveState error:', e);
+    }
+  }
+  console.log(`[sendExplore] stateId=${stateId || '(none)'}`);
 
   const messages = [];
-  groups.slice(0, 5).forEach((group, idx) => {
-    const isLast = idx === Math.min(groups.length, 5) - 1;
-    let quickReply;
+  const maxGroups = Math.min(groups.length, 5); // 一次最多回 5 則訊息
 
-    if (isLast && nextPageToken) {
-      // 把下一頁資訊存起來，避免把 token 放進 postback.data
-      const stateId = await saveState(userId, { lat, lng, radius, nextPageToken });
-      quickReply = buildMoreQuickReply(userId, { stateId });
+  for (let i = 0; i < maxGroups; i++) {
+    const group = groups[i];
+    const isLast = i === maxGroups - 1;
+
+    let quickReply;
+    if (isLast && stateId) {
+      quickReply = buildMoreQuickReply(stateId); // a=em&id=STATEID
+      const bytes = Buffer.byteLength(JSON.stringify(quickReply));
+      console.log(`[sendExplore] quickReply bytes=${bytes}`);
     }
 
-    const alt = groups.length === 1 ? `找到 ${group.length} 家餐廳` : `餐廳清單 ${idx + 1}/${groups.length}`;
-    messages.push(buildFlexMessage(group, alt, quickReply));
-  });
+    const alt = groups.length === 1
+      ? `找到 ${group.length} 家餐廳`
+      : `餐廳清單 ${i + 1}/${groups.length}`;
+    const msg = buildFlexMessage(group, alt, quickReply);
+    messages.push(msg);
+  }
 
   if (groups.length > 5) {
-    // 5 則訊息上限，超過就告知
-    messages.push({ type: 'text', text: `一次最多顯示 50 家（已截斷）。可按「再 10 間」看更多。` });
+    messages.push({ type: 'text', text: '一次最多顯示 50 家（已截斷）。點「再 10 間」看更多。' });
   }
+
+  // 送出前做體積檢查，並把第一則 Flex 打 log（最多 4KB，避免爆 log）
+  const payloadStr = JSON.stringify(messages);
+  console.log(`[sendExplore] reply messages count=${messages.length}, bytes=${Buffer.byteLength(payloadStr)}`);
+  console.log('[sendExplore] firstFlexPreview=', JSON.stringify(messages[0]).slice(0, 4000));
 
   await reply(replyToken, messages);
 }
 
+
 export async function sendRandom({ replyToken, userId, lat, lng, radius, places }) {
+  console.log(`[sendRandom] places=${places?.length || 0} at lat=${lat}, lng=${lng}, radius=${radius}`);
   const list = Array.isArray(places) ? places : [];
-  if (!list.length) {
-    await reply(replyToken, { type: 'text', text: '附近找不到餐廳耶 QQ' });
+  const pick = list.length ? list[Math.floor(Math.random() * list.length)] : null;
+
+  if (!pick) {
+    await reply(replyToken, [{ type: 'text', text: '附近找不到店 QQ，請換個範圍試試。' }]);
     return;
   }
-  const pick = list[Math.floor(Math.random() * list.length)];
+
+  let stateId = null;
+  try {
+    // 只存抽籤條件，之後「再抽一次」會重抓 DB 或 API
+    stateId = await saveState(userId, { lat, lng, radius });
+  } catch (e) {
+    console.error('[sendRandom] saveState error:', e);
+  }
+  console.log(`[sendRandom] stateId=${stateId || '(none)'}`);
+
   const bubble = buildBubble(pick, { lat, lng });
-  const msg = buildFlexMessage([bubble], '今天就吃這間？');
-  await reply(replyToken, msg);
+  const alt = `我推薦：${pick.name || '餐廳'}`;
+
+  const quickReply = stateId ? {
+    items: [
+      { type: 'action', action: { type: 'postback', label: '再抽一次', data: `a=rng&id=${stateId}`, displayText: '再抽一次' } },
+      { type: 'action', action: { type: 'message', label: '探索 1500', text: '探索 1500' } },
+      { type: 'action', action: { type: 'message', label: '探索 3000', text: '探索 3000' } },
+      { type: 'action', action: { type: 'message', label: '探索 5000', text: '探索 5000' } },
+    ]
+  } : undefined;
+
+  const msg = buildFlexMessage([bubble], alt, quickReply);
+
+  console.log('[sendRandom] firstFlexPreview=', JSON.stringify(msg).slice(0, 4000));
+  await reply(replyToken, [msg]);
 }
+
 
 // 直接從 API 探索（當 DB 沒命中時）
 export async function exploreAndSend({ replyToken, userId, lat, lng, radius }) {
