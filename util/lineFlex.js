@@ -93,3 +93,18 @@ export function randomMoreQuickItem(radius) {
     }
   };
 }
+
+function deepPrune(o) {
+  if (Array.isArray(o)) return o.map(deepPrune).filter(Boolean);
+  if (o && typeof o === 'object') {
+    const out = {};
+    for (const [k, v] of Object.entries(o)) {
+      const pv = deepPrune(v);
+      if (pv !== null && pv !== undefined) out[k] = pv;
+    }
+    // drop filler nodes entirely
+    if (out.type === 'filler') return null;
+    return out;
+  }
+  return o;
+}
