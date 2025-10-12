@@ -68,6 +68,23 @@ const toBubbles = (places = []) => {
     }
   }));
 };
+export function buildExploreMessage(places) {
+  const bubbles = toBubbles(places);
+  return {
+    type: 'flex',
+    altText: `找到 ${places.length} 家餐廳`,
+    contents: { type: 'carousel', contents: bubbles }
+  };
+}
+
+export function buildRandomMessage(pick) {
+  const bubble = toBubbles([pick])[0];
+  return {
+    type: 'flex',
+    altText: `抽到了：${pick.name}`,
+    contents: bubble
+  };
+}
 
 export async function sendExplore({ replyToken, user, lat, lng, radius, places = [], nextPageToken = null }) {
   // 1) Flex 內容（最多 12 個 bubble）
