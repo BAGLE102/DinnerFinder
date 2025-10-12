@@ -1,92 +1,93 @@
-// util/lineFlex.js
-// - 不用 { type: 'filler' }
-// - 評分/距離列用 layout: 'horizontal'
-// - 「再 10 間」改成 message action（避免超長 postback）
-// - carousel 每則最多 10 個 bubble
+// src/util/lineFlex.js
+// 產生 Flex 卡片（單張）
+export function restaurantBubble(r, opts = {}) {
+  const name = r.name || '餐廳';
+  const rating = (r.rating != null) ? `⭐ ${r.rating}` : '';
+  const distance = (r.distance != null)
+    ? (r.distance >= 1000 ? `${(r.distance/1000).toFixed(1)} km` : `${r.distance} m`)
+    : '';
+  const addr = r.address || '';
+  const placeId = r.placeId;
+  const lat = r.location?.lat;
+  const lng = r.location?.lng;
 
-export function placeToBubble(p) {
-  const { name, rating, distance, addr, photoUrl, mapUrl } = p || {};
-  const safeName = name || '（未命名）';
+  // Google Maps 連結（帶 placeId 更準確）
+  const mapUrl = placeId
+    ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(name)}&query_place_id=${placeId}`
+    : (lat!=null&&lng!=null ? `https://www.google.com/maps/search/?api=1&query=${lat},${lng}` : undefined);
 
-  const chooseData = `action=choose&name=${encodeURIComponent(safeName)}`;
-  const addData    = `action=add&name=${encodeURIComponent(safeName)}`;
-
-  const bodyContents = [
-    { type: 'text', text: safeName, weight: 'bold', size: 'lg', wrap: true },
-  ];
-
-  if (rating || distance) {
-    bodyContents.push({
-      type: 'box',
-      layout: 'horizontal',
-      spacing: 'sm',
-      contents: [
-        ...(rating   ? [{ type: 'text', text: `${rating}`,   size: 'sm', color: '#777' }] : []),
-        ...(distance ? [{ type: 'text', text: `${distance}`, size: 'sm', color: '#777' }] : []),
-      ]
-    });
+  // 照片（legacy photos 的 photoreference）
+  let heroImageUrl;
+  if (r.photoReference && process.env.GOOGLE_API_KEY) {
+    const maxWidth = 1200;
+    heroImageUrl = `https://maps.googleapis.com/maps/api/place/photo?maxwidth=${maxWidth}&photo_reference=${r.photoReference}&key=${process.env.GOOGLE_API_KEY}`;
+  } else if (r.photoUrl) {
+    heroImageUrl = r.photoUrl;
   }
 
-  if (addr) {
-    bodyContents.push({ type: 'text', text: addr, size: 'sm', color: '#555', wrap: true });
-  }
-
-  const footerButtons = [
-    {
-      type: 'button',
-      style: 'primary',
-      height: 'sm',
-      action: { type: 'postback', label: '就吃這間', data: chooseData, displayText: `就吃 ${safeName}` }
-    },
-    {
-      type: 'button',
-      style: 'secondary',
-      height: 'sm',
-      action: { type: 'postback', label: '加入清單', data: addData, displayText: `加入 ${safeName}` }
-    }
-  ];
-
-  if (mapUrl) {
-    footerButtons.push({
-      type: 'button',
-      style: 'link',
-      height: 'sm',
-      action: { type: 'uri', label: '在地圖開啟', uri: mapUrl }
-    });
-  }
+  // 底部兩顆按鈕用 postback（JSON or querystring 都能被我們的 postback parser 處理）
+  const addData = `action=add&name=${encodeURIComponent(name)}`;
+  const chooseData = `action=choose&name=${encodeURIComponent(name)}`;
 
   return {
     type: 'bubble',
-    ...(photoUrl ? {
-      hero: { type: 'image', url: photoUrl, size: 'full', aspectRatio: '20:13', aspectMode: 'cover' }
-    } : {}),
-    body: { type: 'box', layout: 'vertical', spacing: 'sm', contents: bodyContents },
-    footer: { type: 'box', layout: 'vertical', spacing: 'sm', contents: footerButtons }
+    hero: heroImageUrl ? {
+      type: 'image',
+      url: heroImageUrl,
+      size: 'full',
+      aspectRatio: '20:13',
+      aspectMode: 'cover'
+    } : undefined,
+    body: {
+      type: 'box',
+      layout: 'vertical',
+      spacing: 'sm',
+      contents: [
+        { type: 'text', text: name, weight: 'bold', size: 'lg', wrap: true },
+        {
+          type: 'box',
+          layout: 'baseline',
+          spacing: 'sm',
+          contents: [
+            rating ? { type: 'text', text: rating, size: 'sm', color: '#777777' } : { type: 'filler' },
+            distance ? { type: 'text', text: distance, size: 'sm', color: '#777777' } : { type: 'filler' }
+          ]
+        },
+        addr ? { type: 'text', text: addr, size: 'sm', color: '#555555', wrap: true } : { type: 'filler' }
+      ].filter(Boolean)
+    },
+    footer: {
+      type: 'box',
+      layout: 'vertical',
+      spacing: 'sm',
+      contents: [
+        { type: 'button', style: 'primary', height: 'sm',
+          action: { type: 'postback', label: '就吃這間', data: chooseData, displayText: `就吃 ${name}` } },
+        { type: 'button', style: 'secondary', height: 'sm',
+          action: { type: 'postback', label: '加入清單', data: addData, displayText: `加入 ${name}` } },
+        mapUrl ? { type: 'button', style: 'link', height: 'sm',
+          action: { type: 'uri', label: '在 Google 地圖開啟', uri: mapUrl } } : { type: 'filler' }
+      ]
+    }
   };
 }
 
-export function placesToCarousel(places = []) {
-  const bubbles = (places || []).slice(0, 10).map(placeToBubble);
+// 多張卡片 → carousel
+export function restaurantsCarousel(list) {
+  const bubbles = list.map(r => restaurantBubble(r)).slice(0, 10);
   return { type: 'carousel', contents: bubbles };
 }
 
-export function buildQuickReply() {
+// Quick Reply（常用指令）
+export function quickReply() {
   return {
     items: [
-      { type: 'action', action: { type: 'message',  label: '探索 1500', text: '探索 1500' } },
-      { type: 'action', action: { type: 'message',  label: '探索 3000', text: '探索 3000' } },
-      { type: 'action', action: { type: 'message',  label: '探索 5000', text: '探索 5000' } },
-      { type: 'action', action: { type: 'message',  label: '隨機',       text: '隨機' } },
-      { type: 'action', action: { type: 'message',  label: '我的餐廳',   text: '我的餐廳' } },
-      { type: 'action', action: { type: 'location', label: '傳位置' } },
-      // 重要：這顆改成 message action，避免攜帶巨大 postback data 觸發 400
-      { type: 'action', action: { type: 'message',  label: '再 10 間',   text: '再 10 間' } },
+      { type: 'action', action: { type: 'message', label: '探索 1500', text: '探索 1500' } },
+      { type: 'action', action: { type: 'message', label: '探索 3000', text: '探索 3000' } },
+      { type: 'action', action: { type: 'message', label: '探索 5000', text: '探索 5000' } },
+      { type: 'action', action: { type: 'message', label: '隨機', text: '隨機' } },
+      { type: 'action', action: { type: 'message', label: '我的餐廳', text: '我的餐廳' } },
+      { type: 'action', action: { type: 'location', label: '傳位置' } }
     ]
   };
-}
-
-export function buildFlexMessage({ places = [], altText } = {}) {
-  const contents = placesToCarousel(places);
-  const alt = altText || `找到 ${places.length} 家餐廳`;
-  return { type: 'flex', altText: alt, contents, quickReply: buildQuickReply() };
 }
