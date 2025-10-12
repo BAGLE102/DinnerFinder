@@ -1,7 +1,7 @@
 // service/exploreRestaurant.js
 import { client as lineClient } from '../config/line.js';
 import { saveState } from '../model/postbackState.js';
-import { shortId } from '../utils/id.js';
+import { shortId } from '../util/id.js';
 
 const toBubbles = (places = []) => {
   return places.slice(0, 12).map(p => ({
