@@ -1,36 +1,36 @@
 // config/mongo.js
 import { MongoClient } from 'mongodb';
 
-let client;
-let db;
-
-function inferDbNameFromUri(uri) {
-  try {
-    const after = uri.split('.net/')[1] || '';
-    const path = after.split('?')[0] || '';
-    return path || null;
-  } catch { return null; }
-}
+let _client = null;
+let _db = null;
 
 export async function connectMongo() {
+  if (_db) return _db;
   const uri = process.env.MONGODB_URI;
   if (!uri) throw new Error('MONGODB_URI is required');
 
-  if (!client) {
-    client = new MongoClient(uri, { useUnifiedTopology: true });
-    console.log('[Mongo] connecting to:', uri.replace(/\/\/.*@/,'//***@'));
-    await client.connect();
-    const fromUri = inferDbNameFromUri(uri);
-    const dbName = process.env.MONGODB_DB || fromUri || 'line_dinner';
-    db = client.db(dbName);
-    console.log('[Mongo] dbName option =', fromUri ? '(from URI)' : dbName);
-    await db.collection('users').createIndex({ lineUserId: 1 }, { unique: true });
-    await db.collection('restaurants').createIndex({ place_id: 1 }, { unique: true, sparse: true });
-  }
-  return db;
+  const dbName = process.env.MONGODB_DB || 'what_to_eat_today';
+  _client = new MongoClient(uri, { maxPoolSize: 5 });
+  await _client.connect();
+  _db = _client.db(dbName);
+  console.log('[mongo] connected');
+  return _db;
 }
 
 export function getDb() {
-  if (!db) throw new Error('DB not initialized. Call connectMongo() first.');
-  return db;
+  if (!_db) throw new Error('Mongo not connected yet');
+  return _db;
+}
+
+// 建索引（快取 key 與 TTL）
+export async function ensureIndexes() {
+  const db = getDb();
+  const col = db.collection('place_cache');
+  await col.createIndex({ key: 1 }, { unique: true });
+  // TTL：預設 3 天過期（可改）
+  try {
+    await col.createIndex({ createdAt: 1 }, { expireAfterSeconds: 60 * 60 * 24 * 3 });
+  } catch (e) {
+    // 有些託管環境用舊版，若失敗就略過，程式內還會做時間檢查
+  }
 }
