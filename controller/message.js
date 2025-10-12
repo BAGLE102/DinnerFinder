@@ -1,66 +1,25 @@
 // controller/message.js
-import { client as lineClient } from '../config/line.js';
-import { getPlacesCached } from '../service/cachePlaces.js';
 import { sendExplore, sendRandom } from '../service/exploreRestaurant.js';
+import { searchNearby, getNextPage } from '../service/places.js'; // 你原本的搜尋服務
+import { shortId } from '../util/id.js';
+import { saveState } from '../model/postbackState.js';
 
-const defaultLoc = { lat: 23.5636, lng: 120.4723 }; // 中正大學附近
-const userLoc = new Map(); // userId -> {lat,lng}
-
-function parseRadius(text) {
-  const m = text.match(/探索\s*(\d{3,5})/);
-  if (m) return Math.max(300, Math.min(5000, parseInt(m[1], 10)));
-  return null;
-}
-
-export default async function handleMessage(event) {
-  const replyToken = event.replyToken;
-  const userId = event.source?.userId;
-
-  if (event.message?.type === 'location') {
-    const { latitude, longitude } = event.message;
-    userLoc.set(userId, { lat: latitude, lng: longitude });
-    await lineClient.replyMessage(replyToken, [
-      { type: 'text', text: '已記住你的定位，試試「探索 1500」或「隨機」' }
-    ]);
+export async function onTextMessage({ replyToken, user, text, lat, lng }) {
+  // 解析半徑
+  const m = text.match(/探索\s*(1500|3000|5000)/);
+  if (m) {
+    const radius = Number(m[1]);
+    const { places, nextPageToken } = await searchNearby({ lat, lng, radius });
+    await sendExplore({ replyToken, user, lat, lng, radius, places, nextPageToken });
     return;
   }
 
-  if (event.message?.type !== 'text') {
-    await lineClient.replyMessage(replyToken, [
-      { type: 'text', text: '請輸入「探索 1500/3000/5000」或傳送定位，或輸入「隨機」' }
-    ]);
-    return;
-  }
-
-  const text = (event.message.text || '').trim();
-
-  // 探索指令
-  const r = parseRadius(text);
-  if (r) {
-    const loc = userLoc.get(userId) || defaultLoc;
-    const { places, source } = await getPlacesCached({ ...loc, radius: r });
-    const msg = buildExploreMessage(places.slice(0, 10)); // 限制最多 10 筆
-    await lineClient.replyMessage(replyToken, [msg]);
-    console.log(`[explore] ${source} key, total=${places.length}, sent=${Math.min(10, places.length)}`);
-    return;
-  }
-
-  // 隨機指令
-  if (text === '隨機' || text.toLowerCase() === 'random') {
-    const loc = userLoc.get(userId) || defaultLoc;
+  if (text === '隨機') {
     const radius = 1500;
-    const { places, source } = await getPlacesCached({ ...loc, radius });
-    const msg = buildRandomMessage(places.slice(0, 10));
-    await lineClient.replyMessage(replyToken, [msg]);
-    console.log(`[random] ${source} key, total=${places.length}`);
+    const { places } = await searchNearby({ lat, lng, radius });
+    await sendRandom({ replyToken, userId: user.id, lat, lng, radius, places });
     return;
   }
 
-  // 說明
-  await lineClient.replyMessage(replyToken, [
-    {
-      type: 'text',
-      text: '指令：\n1) 傳位置\n2) 探索 1500/3000/5000\n3) 隨機'
-    }
-  ]);
+  // 其他文字……
 }
