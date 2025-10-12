@@ -1,7 +1,7 @@
 // controller/message.js
 import { client as lineClient } from '../config/line.js';
 import { getPlacesCached } from '../service/cachePlaces.js';
-import { buildExploreMessage, buildRandomMessage } from '../service/exploreRestaurant.js';
+import { sendExplore, sendRandom } from '../service/exploreRestaurant.js';
 
 const defaultLoc = { lat: 23.5636, lng: 120.4723 }; // 中正大學附近
 const userLoc = new Map(); // userId -> {lat,lng}
