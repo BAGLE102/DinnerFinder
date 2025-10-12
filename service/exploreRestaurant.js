@@ -90,3 +90,67 @@ export function buildRandomMessage(pick) {
     contents: bubble
   };
 }
+export async function sendExplore({ replyToken, user, lat, lng, radius, places = [], nextPageToken = null }) {
+  const bubbles = toBubbles(places);
+  if (!bubbles.length) {
+    await lineClient.replyMessage(replyToken, [{ type: 'text', text: '附近暫時找不到餐廳 QQ' }]);
+    return;
+  }
+
+  let moreQR = null;
+  if (nextPageToken) {
+    const id = shortId(8);
+    await saveState(user.id, id, { lat, lng, radius, nextPageToken });
+    moreQR = {
+      type: 'action',
+      action: { type: 'postback', label: '再 10 間', data: `a=em&id=${id}`, displayText: '再 10 間' }
+    };
+  }
+
+  const quickReplyItems = [
+    { type: 'action', action: { type: 'message', label: '探索 1500', text: '探索 1500' } },
+    { type: 'action', action: { type: 'message', label: '探索 3000', text: '探索 3000' } },
+    { type: 'action', action: { type: 'message', label: '探索 5000', text: '探索 5000' } },
+    { type: 'action', action: { type: 'message', label: '隨機', text: '隨機' } },
+    { type: 'action', action: { type: 'message', label: '我的餐廳', text: '我的餐廳' } },
+    { type: 'action', action: { type: 'location', label: '傳位置' } },
+  ];
+  if (moreQR) quickReplyItems.push(moreQR);
+
+  const message = {
+    type: 'flex',
+    altText: `找到 ${places.length} 家餐廳`,
+    contents: { type: 'carousel', contents: bubbles },
+    quickReply: { items: quickReplyItems }
+  };
+
+  await lineClient.replyMessage(replyToken, [message]);
+}
+
+export async function sendRandom({ replyToken, userId, lat, lng, radius, places = [] }) {
+  if (!places.length) {
+    await lineClient.replyMessage(replyToken, [{ type: 'text', text: '找不到候選，請再探索一次～' }]);
+    return;
+  }
+
+  const pick = places[Math.floor(Math.random() * places.length)];
+  const bubble = toBubbles([pick])[0];
+
+  const id = shortId(8);
+  await saveState(userId, id, { lat, lng, radius });
+
+  const msg = {
+    type: 'flex',
+    altText: `抽到了：${pick.name}`,
+    contents: bubble,
+    quickReply: {
+      items: [
+        { type: 'action', action: { type: 'postback', label: '再抽一次', data: `a=rng&id=${id}`, displayText: '再抽一次' } },
+        { type: 'action', action: { type: 'message', label: '探索 1500', text: '探索 1500' } },
+        { type: 'action', action: { type: 'location', label: '傳位置' } },
+      ]
+    }
+  };
+
+  await lineClient.replyMessage(replyToken, [msg]);
+}
