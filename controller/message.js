@@ -19,41 +19,48 @@ export default async function handleMessage(event) {
   if (event.message?.type === 'location') {
     const { latitude, longitude } = event.message;
     userLoc.set(userId, { lat: latitude, lng: longitude });
-    await lineClient.replyMessage(replyToken, [{ type: 'text', text: '已記住你的定位，試試「探索 1500」或「隨機」' }]);
+    await lineClient.replyMessage(replyToken, [
+      { type: 'text', text: '已記住你的定位，試試「探索 1500」或「隨機」' }
+    ]);
     return;
   }
 
   if (event.message?.type !== 'text') {
-    await lineClient.replyMessage(replyToken, [{ type: 'text', text: '請輸入「探索 1500/3000/5000」或傳送定位，或輸入「隨機」' }]);
+    await lineClient.replyMessage(replyToken, [
+      { type: 'text', text: '請輸入「探索 1500/3000/5000」或傳送定位，或輸入「隨機」' }
+    ]);
     return;
   }
 
   const text = (event.message.text || '').trim();
 
-  // 探索
+  // 探索指令
   const r = parseRadius(text);
   if (r) {
     const loc = userLoc.get(userId) || defaultLoc;
     const { places, source } = await getPlacesCached({ ...loc, radius: r });
-    const msg = buildExploreMessage(places);
+    const msg = buildExploreMessage(places.slice(0, 10)); // 限制最多 10 筆
     await lineClient.replyMessage(replyToken, [msg]);
-    console.log(`[explore] ${source} key, count=${places.length}`);
+    console.log(`[explore] ${source} key, total=${places.length}, sent=${Math.min(10, places.length)}`);
     return;
   }
 
-  // 隨機
+  // 隨機指令
   if (text === '隨機' || text.toLowerCase() === 'random') {
     const loc = userLoc.get(userId) || defaultLoc;
     const radius = 1500;
     const { places, source } = await getPlacesCached({ ...loc, radius });
     const msg = buildRandomMessage(places);
     await lineClient.replyMessage(replyToken, [msg]);
-    console.log(`[random] ${source} key, count=${places.length}`);
+    console.log(`[random] ${source} key, total=${places.length}`);
     return;
   }
 
   // 說明
   await lineClient.replyMessage(replyToken, [
-    { type: 'text', text: '指令：\n1) 傳位置\n2) 探索 1500/3000/5000\n3) 隨機' },
+    {
+      type: 'text',
+      text: '指令：\n1) 傳位置\n2) 探索 1500/3000/5000\n3) 隨機'
+    }
   ]);
 }
