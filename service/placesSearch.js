@@ -1,6 +1,6 @@
 // service/placesSearch.js
 import axios from 'axios';
-import { config } from '../config/env.js';
+import { config } from '../config/config.js';
 
 export async function fetchNearbyPlaces({ lat, lng, radius }) {
   const url = 'https://maps.googleapis.com/maps/api/place/nearbysearch/json';
