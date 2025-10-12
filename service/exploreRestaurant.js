@@ -6,12 +6,19 @@ import { shortId } from '../utils/id.js';
 const toBubbles = (places = []) => {
   return places.slice(0, 12).map(p => ({
     type: 'bubble',
-    hero: p.photoUrl ? {
-      type: 'image',
-      url: p.photoUrl, size: 'full', aspectRatio: '20:13', aspectMode: 'cover'
-    } : undefined,
+    ...(p.photoUrl ? {
+      hero: {
+        type: 'image',
+        url: p.photoUrl,
+        size: 'full',
+        aspectRatio: '20:13',
+        aspectMode: 'cover'
+      }
+    } : {}),
     body: {
-      type: 'box', layout: 'vertical', spacing: 'sm',
+      type: 'box',
+      layout: 'vertical',
+      spacing: 'sm',
       contents: [
         { type: 'text', text: p.name || '未命名', weight: 'bold', size: 'lg', wrap: true },
         {
@@ -25,13 +32,38 @@ const toBubbles = (places = []) => {
       ]
     },
     footer: {
-      type: 'box', layout: 'vertical', spacing: 'sm', contents: [
-        { type: 'button', style: 'primary', height: 'sm',
-          action: { type: 'postback', label: '就吃這間', data: `a=choose&id=${p.id}`, displayText: `就吃 ${p.name}` } },
-        { type: 'button', style: 'secondary', height: 'sm',
-          action: { type: 'postback', label: '加入清單', data: `a=add&=${p.}`, displayText: `加入 ${p.name}` } },
-        p.mapUrl ? { type: 'button', style: 'link', height: 'sm',
-          action: { type: 'uri', label: '在地圖開啟', uri: p.mapUrl } } : { type: 'filler' }
+      type: 'box',
+      layout: 'vertical',
+      spacing: 'sm',
+      contents: [
+        {
+          type: 'button',
+          style: 'primary',
+          height: 'sm',
+          action: {
+            type: 'postback',
+            label: '就吃這間',
+            data: `a=choose&id=${p.id}`,
+            displayText: `就吃 ${p.name}`
+          }
+        },
+        {
+          type: 'button',
+          style: 'secondary',
+          height: 'sm',
+          action: {
+            type: 'postback',
+            label: '加入清單',
+            data: `a=add&id=${p.id}`,
+            displayText: `加入 ${p.name}`
+          }
+        },
+        ...(p.mapUrl ? [{
+          type: 'button',
+          style: 'link',
+          height: 'sm',
+          action: { type: 'uri', label: '在地圖開啟', uri: p.mapUrl }
+        }] : [])
       ]
     }
   }));
