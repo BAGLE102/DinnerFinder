@@ -53,7 +53,7 @@ const toBubbles = (places = []) => {
               type: 'postback',
               label: '就吃這間',
               data: `a=choose&id=${p.id}`,
-              displayText: `就吃 ${p.name}`
+              displayText: `就吃 ${safeName}`
             }
           },
           {
@@ -63,7 +63,7 @@ const toBubbles = (places = []) => {
             action: {
               type: 'postback',
               label: '加入清單',
-              data: `action=add&name=${encodeURIComponent(safeName)}`,
+              data: `a=add&id=${p.id}`,
               displayText: `加入 ${safeName}`
             }
           },
@@ -79,7 +79,9 @@ const toBubbles = (places = []) => {
   });
 };
 
-
+// ===========================
+// 建立探索訊息
+// ===========================
 export function buildExploreMessage(places) {
   const bubbles = toBubbles(places);
   return {
@@ -89,6 +91,9 @@ export function buildExploreMessage(places) {
   };
 }
 
+// ===========================
+// 建立隨機抽選訊息
+// ===========================
 export function buildRandomMessage(pick) {
   const bubble = toBubbles([pick])[0];
   return {
@@ -97,6 +102,10 @@ export function buildRandomMessage(pick) {
     contents: bubble
   };
 }
+
+// ===========================
+// 傳送探索結果訊息
+// ===========================
 export async function sendExplore({ replyToken, user, lat, lng, radius, places = [], nextPageToken = null }) {
   const bubbles = toBubbles(places);
   if (!bubbles.length) {
@@ -134,6 +143,9 @@ export async function sendExplore({ replyToken, user, lat, lng, radius, places =
   await lineClient.replyMessage(replyToken, [message]);
 }
 
+// ===========================
+// 傳送隨機餐廳訊息
+// ===========================
 export async function sendRandom({ replyToken, userId, lat, lng, radius, places = [] }) {
   if (!places.length) {
     await lineClient.replyMessage(replyToken, [{ type: 'text', text: '找不到候選，請再探索一次～' }]);
