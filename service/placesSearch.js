@@ -1,60 +1,45 @@
 // service/placesSearch.js
-import axios from 'axios';
+import fetch from 'node-fetch';
 
-// ✅ 相容你的命名：GOOGLE_API_KEY 優先，其次 GOOGLE_MAPS_API_KEY
-const API_KEY = process.env.GOOGLE_API_KEY || process.env.GOOGLE_MAPS_API_KEY || '';
+const API_KEY = process.env.GOOGLE_API_KEY; // 你的環境變數名稱就是這個
+if (!API_KEY) throw new Error('GOOGLE_API_KEY is required');
 
-export function hasPlacesApiKey() {
-  return !!API_KEY;
-}
+const BASE = 'https://maps.googleapis.com/maps/api/place/nearbysearch/json';
 
-// 只打印用到哪個變數名稱，不泄露 key
-if (process.env.NODE_ENV !== 'production') {
-  const which = process.env.GOOGLE_API_KEY
-    ? 'GOOGLE_API_KEY'
-    : (process.env.GOOGLE_MAPS_API_KEY ? 'GOOGLE_MAPS_API_KEY' : 'NONE');
-  console.log(`[places] using key from: ${which}`);
-}
-
-export function buildPhotoUrl(photoReference) {
-  if (!photoReference || !API_KEY) {
-    return 'https://picsum.photos/1200/780?blur=2';
-  }
-  return `https://maps.googleapis.com/maps/api/place/photo?maxwidth=1200&photo_reference=${encodeURIComponent(photoReference)}&key=${API_KEY}`;
-}
-
-export async function fetchNearbyPlaces({ lat, lng, radius }) {
-  // ❌ 不要再 throw：沒 key 就回空，讓上層用 DB 或回文字
-  if (!API_KEY) {
-    return { places: [], status: 'NO_API_KEY' };
-  }
-
+export async function searchNearby({ lat, lng, radius, pagetoken }) {
   const params = new URLSearchParams({
-    location: `${lat},${lng}`,
-    radius: String(radius),
-    type: 'restaurant',
-    keyword: 'restaurant|cafe|bakery|food',
     key: API_KEY,
+    location: `${lat},${lng}`,
+    radius: String(radius || 1500),
+    type: 'restaurant', // 過濾掉學院、ATM 之類
   });
+  if (pagetoken) params.set('pagetoken', pagetoken);
 
-  const url = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?${params.toString()}`;
-  const { data } = await axios.get(url, { timeout: 10000 });
+  const url = `${BASE}?${params.toString()}`;
+  const res = await fetch(url);
+  const json = await res.json();
 
-  if (data.status !== 'OK' && data.status !== 'ZERO_RESULTS') {
-    throw new Error(`Places API error: ${data.status}`);
-  }
-
-  const places = (data.results || []).map((r) => ({
+  // Google 會延遲才能用 next_page_token，邏輯交給上層決定要不要稍後再 call
+  const places = (json.results || []).map((r) => ({
     place_id: r.place_id,
     name: r.name,
     rating: r.rating,
-    vicinity: r.vicinity,
-    photo_reference: r.photos?.[0]?.photo_reference || null,
-    location: {
-      lat: r.geometry?.location?.lat,
-      lng: r.geometry?.location?.lng,
-    },
+    user_ratings_total: r.user_ratings_total,
+    address: r.vicinity,
+    types: r.types,
+    lat: r.geometry?.location?.lat,
+    lng: r.geometry?.location?.lng,
+    photo_reference: r.photos?.[0]?.photo_reference,
   }));
 
-  return { places, status: data.status };
+  return { places, nextPageToken: json.next_page_token || null, raw: json };
+}
+
+export function photoUrl(ref) {
+  if (!ref) return null;
+  const u = new URL('https://maps.googleapis.com/maps/api/place/photo');
+  u.searchParams.set('maxwidth', '1200');
+  u.searchParams.set('photo_reference', ref);
+  u.searchParams.set('key', API_KEY);
+  return u.toString();
 }
