@@ -1,7 +1,7 @@
 // service/exploreRestaurant.js
 import { client as lineClient } from '../config/line.js';
 import { saveState } from '../model/postbackState.js';
-import { nanoid } from 'nanoid';
+import { shortId } from '../utils/id.js';
 
 const toBubbles = (places = []) => {
   return places.slice(0, 12).map(p => ({
@@ -29,7 +29,7 @@ const toBubbles = (places = []) => {
         { type: 'button', style: 'primary', height: 'sm',
           action: { type: 'postback', label: '就吃這間', data: `a=choose&id=${p.id}`, displayText: `就吃 ${p.name}` } },
         { type: 'button', style: 'secondary', height: 'sm',
-          action: { type: 'postback', label: '加入清單', data: `a=add&id=${p.id}`, displayText: `加入 ${p.name}` } },
+          action: { type: 'postback', label: '加入清單', data: `a=add&=${p.}`, displayText: `加入 ${p.name}` } },
         p.mapUrl ? { type: 'button', style: 'link', height: 'sm',
           action: { type: 'uri', label: '在地圖開啟', uri: p.mapUrl } } : { type: 'filler' }
       ]
@@ -37,7 +37,7 @@ const toBubbles = (places = []) => {
   }));
 };
 
-export async function sendExplore({ replyToken, userId, lat, lng, radius, places = [], nextPageToken = null }) {
+export async function sendExplore({ replyToken, user, lat, lng, radius, places = [], nextPageToken = null }) {
   // 1) Flex 內容（最多 12 個 bubble）
   const bubbles = toBubbles(places);
   if (!bubbles.length) {
@@ -45,10 +45,10 @@ export async function sendExplore({ replyToken, userId, lat, lng, radius, places
     return;
   }
 
-  // 2) 如果有下一頁，先把 token 存起來，回 Quick Reply 用短 id
+  // 2) 如果有下一頁，先把 token 存起來，回 Quick Reply 用短 
   let moreQR = null;
   if (nextPageToken) {
-    const id = nanoid(8);
+    const id = shortId(8);
     await saveState(userId, id, { lat, lng, radius, nextPageToken }); // 只存必要欄位
     moreQR = {
       type: 'action',
