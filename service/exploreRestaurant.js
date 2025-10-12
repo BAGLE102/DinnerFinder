@@ -69,7 +69,7 @@ const toBubbles = (places = []) => {
   }));
 };
 export function buildExploreMessage(places) {
-  const bubbles = toBubbles(places.slice(0, 12));
+  const bubbles = toBubbles(places.slice(0, 10)); 
   return {
     type: 'flex',
     altText: `找到 ${places.length} 家餐廳`,
