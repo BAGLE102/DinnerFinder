@@ -12,6 +12,15 @@ const NEARBY_ENDPOINT = 'https://maps.googleapis.com/maps/api/place/nearbysearch
  * - 否則用 lat/lng/radius 打第一頁
  * 回傳：{ places, nextPageToken }
  */
+// 產生 Google Places Photo URL（有 ref 才回網址，沒有就回 null）
+export function photoUrl(photo_reference, maxwidth = 1200) {
+  if (!photo_reference) {
+    console.warn('[placesSearch] photoUrl: missing photo_reference');
+    return null;
+  }
+  return `https://maps.googleapis.com/maps/api/place/photo?maxwidth=${maxwidth}&photo_reference=${encodeURIComponent(photo_reference)}&key=${process.env.GOOGLE_MAPS_API_KEY}`;
+}
+
 export async function searchNearby({ lat, lng, radius, pagetoken } = {}) {
   try {
     let url;
