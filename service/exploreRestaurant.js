@@ -52,8 +52,8 @@ const toBubbles = (places = []) => {
             action: {
               type: 'postback',
               label: '就吃這間',
-              data: `action=choose&name=${encodeURIComponent(safeName)}`,
-              displayText: `就吃 ${safeName}`
+              data: `a=choose&id=${p.id}`,
+              displayText: `就吃 ${p.name}`
             }
           },
           {
