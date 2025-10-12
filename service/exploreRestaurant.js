@@ -79,33 +79,7 @@ const toBubbles = (places = []) => {
   });
 };
 
-// ===========================
-// 建立探索訊息
-// ===========================
-export function buildExploreMessage(places) {
-  const bubbles = toBubbles(places);
-  return {
-    type: 'flex',
-    altText: `找到 ${bubbles.length} 家餐廳`,
-    contents: { type: 'carousel', contents: bubbles }
-  };
-}
-
-// ===========================
-// 建立隨機抽選訊息
-// ===========================
-export function buildRandomMessage(pick) {
-  const bubble = toBubbles([pick])[0];
-  return {
-    type: 'flex',
-    altText: `抽到了：${pick.name}`,
-    contents: bubble
-  };
-}
-
-// ===========================
-// 傳送探索結果訊息
-// ===========================
+// --- 以下部分保持一致 ---
 export async function sendExplore({ replyToken, user, lat, lng, radius, places = [], nextPageToken = null }) {
   const bubbles = toBubbles(places);
   if (!bubbles.length) {
@@ -143,9 +117,6 @@ export async function sendExplore({ replyToken, user, lat, lng, radius, places =
   await lineClient.replyMessage(replyToken, [message]);
 }
 
-// ===========================
-// 傳送隨機餐廳訊息
-// ===========================
 export async function sendRandom({ replyToken, userId, lat, lng, radius, places = [] }) {
   if (!places.length) {
     await lineClient.replyMessage(replyToken, [{ type: 'text', text: '找不到候選，請再探索一次～' }]);
