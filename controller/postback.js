@@ -1,60 +1,46 @@
 // controller/postback.js
 import { loadState, deleteState } from '../model/postbackState.js';
 import { sendExplore, sendRandom } from '../service/exploreRestaurant.js';
-import { searchNearby } from '../service/placesSearch.js';
-import { client as lineClient } from '../config/line.js';
+import { getNextPage } from '../service/places.js';
+import { addFavorite, choosePlace } from '../service/userList.js'; // 你原本的業務
 
-function parseKV(str) {
-  const p = new URLSearchParams(str || '');
-  const o = {};
-  for (const [k, v] of p.entries()) o[k] = v;
-  return o;
-}
+const parseData = (data) => Object.fromEntries(new URLSearchParams(data));
 
-export default async function handlePostback(event) {
-  const userId = event.source?.userId;
-  const replyToken = event.replyToken;
-  const data = parseKV(event.postback?.data || '');
+export async function onPostback({ replyToken, user, postback }) {
+  const args = parseData(postback.data);
+  const a = args.a;
+  if (!a) return;
 
-  try {
-    switch (data.a) {
-      case 'em': { // explore more（用短 id 換 token）
-        const st = await loadState(userId, data.id);
-        if (!st) {
-          await lineClient.replyMessage(replyToken, [{ type: 'text', text: '清單已過期，請再打「探索 1500」' }]);
-          return;
-        }
-        const { lat, lng, radius, nextPageToken } = st;
-        const { places, nextPageToken: next2 } = await searchNearby({ lat, lng, radius, pagetoken: nextPageToken });
-        await sendExplore({ replyToken, userId, lat, lng, radius, places, nextPageToken: next2 });
-        await deleteState(userId, data.id); // 用一次就丟
-        break;
-      }
-      case 'rng': { // random again
-        const st = await loadState(userId, data.id);
-        if (!st) {
-          await lineClient.replyMessage(replyToken, [{ type: 'text', text: '抽選條件已過期，請再打「隨機」' }]);
-          return;
-        }
-        const { lat, lng, radius } = st;
-        const { places } = await searchNearby({ lat, lng, radius });
-        await sendRandom({ replyToken, userId, lat, lng, radius, places });
-        break;
-      }
-      case 'choose': {
-        await lineClient.replyMessage(replyToken, [{ type: 'text', text: '已選擇這間！' }]);
-        break;
-      }
-      case 'add': {
-        await lineClient.replyMessage(replyToken, [{ type: 'text', text: '已加入你的清單！' }]);
-        break;
-      }
-      default:
-        await lineClient.replyMessage(replyToken, [{ type: 'text', text: '操作無效或已過期，請重新探索。' }]);
-    }
-  } catch (err) {
-    const body = err?.originalError?.response?.data || err?.response?.data || err?.message;
-    console.error('[postback] error', body);
-    await lineClient.replyMessage(replyToken, [{ type: 'text', text: '出錯了，我再修一下 QQ' }]);
+  if (a === 'choose' && args.id) {
+    await choosePlace(user.id, args.id);
+    await sendText(replyToken, '已選擇！');
+    return;
+  }
+
+  if (a === 'add' && args.id) {
+    await addFavorite(user.id, args.id);
+    await sendText(replyToken, '已加入清單！');
+    return;
+  }
+
+  // explore more
+  if (a === 'em' && args.id) {
+    const st = await loadState(user.id, args.id);
+    if (!st) { await sendText(replyToken, '這頁失效了，請再探索一次'); return; }
+    const { lat, lng, radius, nextPageToken } = st;
+    const { places, nextPageToken: npt } = await getNextPage({ nextPageToken });
+    await sendExplore({ replyToken, user, lat, lng, radius, places, nextPageToken: npt });
+    return;
+  }
+
+  // random again
+  if (a === 'rng' && args.id) {
+    const st = await loadState(user.id, args.id);
+    if (!st) { await sendText(replyToken, '候選失效了，請再探索一次'); return; }
+    const { lat, lng, radius } = st;
+    // 你可以在 state 裡也存 places，或重撈：
+    const { places } = await searchNearby({ lat, lng, radius });
+    await sendRandom({ replyToken, userId: user.id, lat, lng, radius, places });
+    return;
   }
 }
