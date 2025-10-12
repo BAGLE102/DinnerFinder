@@ -43,3 +43,5 @@ export function photoUrl(ref) {
   u.searchParams.set('key', API_KEY);
   return u.toString();
 }
+// 讓 cachePlaces.js 可以用舊名稱
+export { searchNearby as fetchNearbyPlaces, searchNextPage as fetchNextPage };
