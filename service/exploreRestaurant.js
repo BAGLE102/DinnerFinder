@@ -1,189 +1,126 @@
-// service/exploreRestaurant.js
-import { client as lineClient } from '../config/line.js';
-import { saveState } from '../model/postbackState.js';
-import { shortId } from '../util/id.js';
+// src/service/exploreRestaurant.js (Legacy Places API 版，default export)
+import fetch from 'node-fetch';
+import User from '../model/user.js';
 
-const MAX_BUBBLES = 10;   // LINE Flex carousel 最多 10
-const MAX_ALT = 400;      // 安全上限（實務上 300~400 內較穩）
+// Haversine 距離（公尺）
+function distMeters(a, b) {
+  const toRad = d => (d * Math.PI) / 180;
+  const R = 6371000;
+  const dLat = toRad(b.lat - a.lat);
+  const dLng = toRad(b.lng - a.lng);
+  const s1 = Math.sin(dLat / 2);
+  const s2 = Math.sin(dLng / 2);
+  const A = s1 * s1 + Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * s2 * s2;
+  const C = 2 * Math.atan2(Math.sqrt(A), Math.sqrt(1 - A));
+  return Math.round(R * C);
+}
 
-const safeText = (s, fallback = '') =>
-  (typeof s === 'string' && s.trim().length ? s.trim() : fallback);
+async function fetchJson(url) {
+  const r = await fetch(url);
+  const data = await r.json().catch(() => ({}));
+  return { ok: r.ok, status: r.status, data };
+}
 
-const safeKmOrM = (m) => {
-  if (m === null || m === undefined || Number.isNaN(Number(m))) return '距離未知';
-  const n = Number(m);
-  return n >= 1000 ? `${(n / 1000).toFixed(1)} km` : `${Math.round(n)} m`;
-};
+// 把 legacy results 正規化（含距離/照片）
+function normalizeResults(results, anchor) {
+  const seen = new Set();
+  const out = [];
+  for (const p of (results || [])) {
+    const placeId = p.place_id;
+    const name = (p.name || '').trim();
+    const key = placeId || name.toLowerCase();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
 
-const validHttps = (url) => {
-  try {
-    const u = new URL(url);
-    return u.protocol === 'https:' ? u.toString() : null;
-  } catch { return null; }
-};
+    const lat = p.geometry?.location?.lat;
+    const lng = p.geometry?.location?.lng;
 
-const ellipsis = (s = '', max = 60) => {
-  const t = String(s);
-  return t.length > max ? t.slice(0, max) + '…' : t;
-};
+    out.push({
+      placeId,
+      name,
+      rating: p.rating,
+      address: p.vicinity || p.formatted_address || '',
+      location: (lat!=null && lng!=null) ? { lat, lng } : undefined,
+      distance: (anchor && lat!=null && lng!=null) ? distMeters(anchor, { lat, lng }) : undefined,
+      photoReference: Array.isArray(p.photos) && p.photos[0]?.photo_reference
+        ? p.photos[0].photo_reference : undefined
+    });
+  }
+  out.sort((a, b) => (a.distance ?? 0) - (b.distance ?? 0));
+  return out;
+}
 
-const toBubbles = (places = []) => {
-  return places.slice(0, MAX_BUBBLES).map((p) => {
-    // 1) 確保 postback data 不為空（LINE 規格 1~300 bytes）
-    const id = safeText(p.id) || `p_${shortId(8)}`;
+export default async function exploreRestaurant(lineUserId, radiusMeters = 1500, opts = {}) {
+  const debug = !!opts.debug;
+  const limit = Number(opts.limit) || 10;
 
-    const rawName = safeText(p.name, '未命名');
-    const safeName = ellipsis(rawName, 50);
+  const user = await User.findOne({ lineUserId }).lean();
+  if (!user) return { ok: false, text: '找不到使用者，請先跟我說話或重新加入好友。' };
 
-    const rawAddr = safeText(p.address, '地址不詳');
-    const safeAddress = ellipsis(rawAddr, 60);
+  const last = user.lastLocation;
+  if (!last || typeof last.lat !== 'number' || typeof last.lng !== 'number') {
+    return { ok: false, text: '還沒有你的所在位置，請先傳一則「位置訊息」。' };
+  }
 
-    const safeDistance = safeKmOrM(p.distance);
+  const key = process.env.GOOGLE_API_KEY;
+  if (!key) return { ok: false, text: '未設定 GOOGLE_API_KEY，無法探索附近餐廳。' };
 
-    // 2) 顯示分數（可為 0）
-    const ratingText = (p.rating || p.rating === 0) ? `⭐ ${p.rating}` : null;
+  const radius = Math.max(100, Math.min(50000, Number(radiusMeters) || 1500));
+  const base = { lat: last.lat, lng: last.lng };
 
-    // 3) URL 僅接收 https（避免 400）
-    const photoUrl = p.photoUrl ? validHttps(p.photoUrl) : null;
-    const mapUrl = p.mapUrl ? validHttps(p.mapUrl) : null;
+  const tries = [];
 
-    const bodyContents = [
-      { type: 'text', text: safeName, weight: 'bold', size: 'lg', wrap: true },
-      {
-        type: 'box',
-        layout: 'baseline',
-        spacing: 'sm',
-        contents: [
-          ...(ratingText ? [{ type: 'text', text: ratingText, size: 'sm', color: '#777' }] : []),
-          { type: 'text', text: safeDistance, size: 'sm', color: '#777' }
-        ]
-      },
-      { type: 'text', text: safeAddress, size: 'sm', color: '#555', wrap: true }
-    ];
+  // 1) nearby + type=restaurant
+  const u1 = new URL('https://maps.googleapis.com/maps/api/place/nearbysearch/json');
+  u1.searchParams.set('location', `${base.lat},${base.lng}`);
+  u1.searchParams.set('radius', String(radius));
+  u1.searchParams.set('type', 'restaurant');
+  u1.searchParams.set('language', 'zh-TW');
+  u1.searchParams.set('key', key);
+  tries.push({ api: 'nearby', note: 'type=restaurant', url: u1 });
 
-    const footerButtons = [
-      {
-        type: 'button',
-        style: 'primary',
-        height: 'sm',
-        action: {
-          type: 'postback',
-          label: '就吃這間',
-          data: `a=choose&id=${encodeURIComponent(id)}`,
-          displayText: `就吃 ${safeName}`
-        }
-      },
-      {
-        type: 'button',
-        style: 'secondary',
-        height: 'sm',
-        action: {
-          type: 'postback',
-          label: '加入清單',
-          data: `a=add&id=${encodeURIComponent(id)}`,
-          displayText: `加入 ${safeName}`
-        }
-      },
-      ...(mapUrl ? [{
-        type: 'button',
-        style: 'link',
-        height: 'sm',
-        action: { type: 'uri', label: '在地圖開啟', uri: mapUrl }
-      }] : [])
-    ];
+  // 2) nearby + keyword（中文常見）
+  const u2 = new URL('https://maps.googleapis.com/maps/api/place/nearbysearch/json');
+  u2.searchParams.set('location', `${base.lat},${base.lng}`);
+  u2.searchParams.set('radius', String(radius));
+  u2.searchParams.set('keyword', '餐廳|小吃|早午餐|便當|麵|飯|food');
+  u2.searchParams.set('language', 'zh-TW');
+  u2.searchParams.set('key', key);
+  tries.push({ api: 'nearby', note: 'keyword=餐廳|小吃|…', url: u2 });
 
-    const bubble = {
-      type: 'bubble',
-      body: { type: 'box', layout: 'vertical', spacing: 'sm', contents: bodyContents },
-      footer: { type: 'box', layout: 'vertical', spacing: 'sm', contents: footerButtons }
-    };
+  // 3) textsearch
+  const u3 = new URL('https://maps.googleapis.com/maps/api/place/textsearch/json');
+  u3.searchParams.set('query', '餐廳');
+  u3.searchParams.set('location', `${base.lat},${base.lng}`);
+  u3.searchParams.set('radius', String(radius));
+  u3.searchParams.set('language', 'zh-TW');
+  u3.searchParams.set('key', key);
+  tries.push({ api: 'textsearch', note: 'query=餐廳', url: u3 });
 
-    if (photoUrl) {
-      bubble.hero = {
-        type: 'image',
-        url: photoUrl,
-        size: 'full',
-        aspectRatio: '20:13',
-        aspectMode: 'cover'
+  const debugSteps = [];
+
+  for (const t of tries) {
+    const { ok, status, data } = await fetchJson(t.url.toString());
+    const gStatus = data?.status;
+    const errorMessage = data?.error_message;
+    const list = normalizeResults(data?.results, base);
+    debugSteps.push({ api: t.api, note: t.note, httpStatus: status, googleStatus: gStatus, errorMessage, count: list.length });
+
+    if (ok && gStatus === 'OK' && list.length) {
+      return {
+        ok: true,
+        results: list.slice(0, limit),
+        meta: { api: t.api, note: t.note, total: list.length, radiusUsed: radius },
+        ...(debug ? { debug: debugSteps } : {})
       };
     }
 
-    return bubble;
-  });
-};
-
-const clampAlt = (text) => {
-  const t = safeText(text, '');
-  return t.length <= MAX_ALT ? t : `${t.slice(0, MAX_ALT - 1)}…`;
-};
-
-// ========== Explore ==========
-export async function sendExplore({
-  replyToken, user, lat, lng, radius, places = [], nextPageToken = null
-}) {
-  const bubbles = toBubbles(places);
-
-  if (!bubbles.length) {
-    await lineClient.replyMessage(replyToken, [{ type: 'text', text: '附近暫時找不到餐廳 QQ' }]);
-    return;
-  }
-
-  // 「再 10 間」：把長 token 存 state，用短碼放入 postback data
-  let moreQR = null;
-  if (nextPageToken) {
-    const id = shortId(8); // 短碼
-    await saveState(user.id, id, { lat, lng, radius, nextPageToken });
-    moreQR = {
-      type: 'action',
-      action: { type: 'postback', label: '再 10 間', data: `a=em&id=${id}`, displayText: '再 10 間' }
-    };
-  }
-
-  const quickReplyItems = [
-    { type: 'action', action: { type: 'message', label: '探索 1500', text: '探索 1500' } },
-    { type: 'action', action: { type: 'message', label: '探索 3000', text: '探索 3000' } },
-    { type: 'action', action: { type: 'message', label: '探索 5000', text: '探索 5000' } },
-    { type: 'action', action: { type: 'message', label: '隨機', text: '隨機' } },
-    { type: 'action', action: { type: 'message', label: '我的餐廳', text: '我的餐廳' } },
-    { type: 'action', action: { type: 'location', label: '傳位置' } },
-    ...(moreQR ? [moreQR] : [])
-  ];
-
-  const message = {
-    type: 'flex',
-    altText: clampAlt(`找到 ${bubbles.length} 家餐廳`), // 不再顯示 20，與實際送出的 10 對齊
-    contents: { type: 'carousel', contents: bubbles },
-    quickReply: { items: quickReplyItems }
-  };
-
-  await lineClient.replyMessage(replyToken, [message]);
-}
-
-// ========== Random ==========
-export async function sendRandom({ replyToken, userId, lat, lng, radius, places = [] }) {
-  if (!places.length) {
-    await lineClient.replyMessage(replyToken, [{ type: 'text', text: '找不到候選，請再探索一次～' }]);
-    return;
-  }
-
-  const pick = places[Math.floor(Math.random() * places.length)];
-  const bubble = toBubbles([pick])[0];
-
-  const id = shortId(8);
-  await saveState(userId, id, { lat, lng, radius });
-
-  const msg = {
-    type: 'flex',
-    altText: clampAlt(`抽到了：${safeText(pick.name, '未命名')}`),
-    contents: bubble, // LINE Flex 支援直接放單一 bubble
-    quickReply: {
-      items: [
-        { type: 'action', action: { type: 'postback', label: '再抽一次', data: `a=rng&id=${id}`, displayText: '再抽一次' } },
-        { type: 'action', action: { type: 'message', label: '探索 1500', text: '探索 1500' } },
-        { type: 'action', action: { type: 'location', label: '傳位置' } }
-      ]
+    if (ok && gStatus && gStatus !== 'ZERO_RESULTS') {
+      const text = `Google ${t.api} 回傳：${gStatus}` + (errorMessage ? `\n${errorMessage}` : '');
+      return { ok: false, text, ...(debug ? { debug: debugSteps } : {}) };
     }
-  };
+  }
 
-  await lineClient.replyMessage(replyToken, [msg]);
+  const text = `附近暫時找不到餐廳（半徑 ${radius}m）。\n可試試「探索 3000 / 5000」或換個位置。`;
+  return { ok: false, text, ...(debug ? { debug: debugSteps } : {}) };
 }
