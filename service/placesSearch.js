@@ -1,30 +1,28 @@
 // service/placesSearch.js
-import fetch from 'node-fetch';
+import axios from 'axios';
+import { config } from '../config/env.js';
 
-export async function searchNearby({ lat, lng, radius, pagetoken }) {
-  const params = new URLSearchParams({
-    key: process.env.GMAPS_API_KEY,
+export async function fetchNearbyPlaces({ lat, lng, radius }) {
+  const url = 'https://maps.googleapis.com/maps/api/place/nearbysearch/json';
+  const params = {
     location: `${lat},${lng}`,
-    radius: String(radius),
-    type: 'restaurant'
-  });
-  if (pagetoken) params.set('pagetoken', pagetoken);
+    radius,
+    type: 'restaurant',
+    key: config.GOOGLE_API_KEY
+  };
 
-  const url = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?${params}`;
-  const res = await fetch(url);
-  const json = await res.json();
+  const res = await axios.get(url, { params });
+  const results = res.data.results || [];
 
-  const places = (json.results || []).map(r => ({
+  return results.slice(0, 20).map(r => ({
     id: r.place_id,
     name: r.name,
     rating: r.rating,
     address: r.vicinity,
-    mapUrl: `https://www.google.com/maps/search/?api=1&query_place_id=${r.place_id}`,
     photoUrl: r.photos?.[0]
-      ? `https://maps.googleapis.com/maps/api/place/photo?maxwidth=1200&photo_reference=${r.photos[0].photo_reference}&key=${process.env.GMAPS_API_KEY}`
-      : undefined,
-    // 你若有自行計算距離，從外部塞進來即可
+      ? `https://maps.googleapis.com/maps/api/place/photo?maxwidth=1200&photo_reference=${r.photos[0].photo_reference}&key=${config.GOOGLE_API_KEY}`
+      : null,
+    mapUrl: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(r.name)}&query_place_id=${r.place_id}`,
+    distance: r.distance_meters || 0
   }));
-
-  return { places, nextPageToken: json.next_page_token || null };
 }
