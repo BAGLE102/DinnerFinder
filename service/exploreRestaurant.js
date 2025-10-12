@@ -22,57 +22,69 @@ function buildBubble(p, base) {
 
   const bodyContents = [
     { type: 'text', text: p.name || '未命名', weight: 'bold', size: 'lg', wrap: true },
-    {
+  ];
+
+  // 只有有評分/距離時才加入 baseline box，避免空 contents 觸發 400
+  const detailItems = [];
+  if (p.rating) detailItems.push({ type: 'text', text: `⭐ ${p.rating}`, size: 'sm', color: '#777' });
+  if (distance != null) detailItems.push({ type: 'text', text: `${distance} m`, size: 'sm', color: '#777' });
+  if (detailItems.length > 0) {
+    bodyContents.push({
       type: 'box',
       layout: 'baseline',
       spacing: 'sm',
-      contents: [
-        ...(p.rating ? [{ type: 'text', text: `⭐ ${p.rating}`, size: 'sm', color: '#777' }] : []),
-        ...(distance != null ? [{ type: 'text', text: `${distance} m`, size: 'sm', color: '#777' }] : []),
-      ],
-    },
-    ...(p.address ? [{ type: 'text', text: p.address, size: 'sm', color: '#555', wrap: true }] : []),
-  ];
+      contents: detailItems,
+    });
+  }
 
-  const footer = {
-    type: 'box',
-    layout: 'vertical',
-    spacing: 'sm',
-    contents: [
-      {
-        type: 'button',
-        style: 'primary',
-        height: 'sm',
-        action: {
-          type: 'postback',
-          label: '就吃這間',
-          data: `a=choose&pid=${encodeURIComponent(p.place_id)}`,
-          displayText: `就吃 ${p.name}`,
-        },
+  if (p.address) {
+    bodyContents.push({ type: 'text', text: p.address, size: 'sm', color: '#555', wrap: true });
+  }
+
+  // footer：有 place_id 才放 postback 按鈕
+  const footerButtons = [];
+  if (p.place_id) {
+    footerButtons.push({
+      type: 'button',
+      style: 'primary',
+      height: 'sm',
+      action: {
+        type: 'postback',
+        label: '就吃這間',
+        data: `a=choose&pid=${encodeURIComponent(p.place_id)}`,
+        displayText: `就吃 ${p.name || ''}`,
       },
-      {
-        type: 'button',
-        style: 'secondary',
-        height: 'sm',
-        action: {
-          type: 'postback',
-          label: '加入清單',
-          data: `a=add&pid=${encodeURIComponent(p.place_id)}`,
-          displayText: `加入 ${p.name}`,
-        },
+    });
+    footerButtons.push({
+      type: 'button',
+      style: 'secondary',
+      height: 'sm',
+      action: {
+        type: 'postback',
+        label: '加入清單',
+        data: `a=add&pid=${encodeURIComponent(p.place_id)}`,
+        displayText: `加入 ${p.name || ''}`,
       },
-      {
-        type: 'button',
-        style: 'link',
-        height: 'sm',
-        action: {
-          type: 'uri',
-          label: '在地圖開啟',
-          uri: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(p.name)}&query_place_id=${encodeURIComponent(p.place_id)}`,
-        },
-      },
-    ],
-  };
+    });
+  }
+
+  // 地圖按鈕：有 pid 用 query_place_id，沒有就只用 query
+  const mapUri = p.place_id
+    ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(p.name || '')}&query_place_id=${encodeURIComponent(p.place_id)}`
+    : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(p.name || '')}`;
+
+  footerButtons.push({
+    type: 'button',
+    style: 'link',
+    height: 'sm',
+    action: {
+      type: 'uri',
+      label: '在地圖開啟',
+      uri: mapUri,
+    },
+  });
+
+  const footer = { type: 'box', layout: 'vertical', spacing: 'sm', contents: footerButtons };
 
   const bubble = {
     type: 'bubble',
@@ -80,6 +92,7 @@ function buildBubble(p, base) {
     footer,
   };
 
+  // hero：只有有圖才加，避免 url:null/undefined 造成 400
   const img = photoUrl(p.photo_reference);
   if (img) {
     bubble.hero = {
@@ -115,8 +128,9 @@ function buildFlexMessage(bubbles, altText, quickReply) {
 function buildMoreQuickReply(stateId) {
   const data = `a=em&id=${stateId}`; // controller/postback 解析的 key
   // 安全檢查：LINE postback.data 限制 ~300 bytes
-  if (Buffer.byteLength(data) > 300) {
-    console.warn('[buildMoreQuickReply] postback data too long, trimming');
+  const size = Buffer.byteLength(data);
+  if (size > 300) {
+    console.warn('[buildMoreQuickReply] postback data too long:', size);
   }
   return {
     items: [
@@ -135,14 +149,14 @@ function buildMoreQuickReply(stateId) {
   };
 }
 
-
 export async function sendExplore({ replyToken, userId, lat, lng, radius, places, nextPageToken }) {
-  const bubbles = (places || []).map((p) => buildBubble(p, { lat, lng }));
+  const safePlaces = Array.isArray(places) ? places : [];
+  const bubbles = safePlaces.map((p) => buildBubble(p, { lat, lng }));
   const groups = chunk(bubbles, 10); // 1 則 Flex 最多 10 個 bubble
 
-  console.log(`[sendExplore] places=${places?.length || 0}, groups=${groups.length}, hasNext=${!!nextPageToken}`);
+  console.log(`[sendExplore] places=${safePlaces.length}, groups=${groups.length}, hasNext=${!!nextPageToken}`);
 
-  // 先存下一頁 token，避免在迴圈裡 await 造成語法/執行問題
+  // 先存下一頁 token
   let stateId = null;
   if (nextPageToken) {
     try {
@@ -154,10 +168,10 @@ export async function sendExplore({ replyToken, userId, lat, lng, radius, places
   console.log(`[sendExplore] stateId=${stateId || '(none)'}`);
 
   const messages = [];
-  const maxGroups = Math.min(groups.length, 5); // 一次最多回 5 則訊息
+  const maxGroups = Math.min(groups.length || 1, 5); // 至少要回一則
 
   for (let i = 0; i < maxGroups; i++) {
-    const group = groups[i];
+    const group = groups[i] || []; // 若完全沒有結果，group 可能是 undefined
     const isLast = i === maxGroups - 1;
 
     let quickReply;
@@ -167,14 +181,15 @@ export async function sendExplore({ replyToken, userId, lat, lng, radius, places
       console.log(`[sendExplore] quickReply bytes=${bytes}`);
     }
 
-    const alt = groups.length === 1
+    const alt = (groups.length <= 1)
       ? `找到 ${group.length} 家餐廳`
       : `餐廳清單 ${i + 1}/${groups.length}`;
+
     const msg = buildFlexMessage(group, alt, quickReply);
     messages.push(msg);
   }
 
-  if (groups.length > 5) {
+  if ((groups.length || 0) > 5) {
     messages.push({ type: 'text', text: '一次最多顯示 50 家（已截斷）。點「再 10 間」看更多。' });
   }
 
@@ -183,9 +198,13 @@ export async function sendExplore({ replyToken, userId, lat, lng, radius, places
   console.log(`[sendExplore] reply messages count=${messages.length}, bytes=${Buffer.byteLength(payloadStr)}`);
   console.log('[sendExplore] firstFlexPreview=', JSON.stringify(messages[0]).slice(0, 4000));
 
-  await reply(replyToken, messages);
+  try {
+    await reply(replyToken, messages);
+  } catch (e) {
+    console.error('[sendExplore] reply error status=', e?.response?.status, 'data=', e?.response?.data);
+    throw e;
+  }
 }
-
 
 export async function sendRandom({ replyToken, userId, lat, lng, radius, places }) {
   console.log(`[sendRandom] places=${places?.length || 0} at lat=${lat}, lng=${lng}, radius=${radius}`);
@@ -221,9 +240,14 @@ export async function sendRandom({ replyToken, userId, lat, lng, radius, places 
   const msg = buildFlexMessage([bubble], alt, quickReply);
 
   console.log('[sendRandom] firstFlexPreview=', JSON.stringify(msg).slice(0, 4000));
-  await reply(replyToken, [msg]);
-}
 
+  try {
+    await reply(replyToken, [msg]);
+  } catch (e) {
+    console.error('[sendRandom] reply error status=', e?.response?.status, 'data=', e?.response?.data);
+    throw e;
+  }
+}
 
 // 直接從 API 探索（當 DB 沒命中時）
 export async function exploreAndSend({ replyToken, userId, lat, lng, radius }) {
