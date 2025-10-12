@@ -1,47 +1,98 @@
 // service/placesSearch.js
-import fetch from 'node-fetch';
+import axios from 'axios';
 
-const API_KEY = process.env.GOOGLE_API_KEY; // 你的環境變數名稱就是這個
-if (!API_KEY) throw new Error('GOOGLE_API_KEY is required');
+const API_KEY = process.env.GOOGLE_MAPS_API_KEY;
+if (!API_KEY) throw new Error('GOOGLE_MAPS_API_KEY is required');
 
-const BASE = 'https://maps.googleapis.com/maps/api/place/nearbysearch/json';
+const NEARBY_ENDPOINT = 'https://maps.googleapis.com/maps/api/place/nearbysearch/json';
 
-export async function searchNearby({ lat, lng, radius, pagetoken }) {
-  const params = new URLSearchParams({
-    key: API_KEY,
-    location: `${lat},${lng}`,
-    radius: String(radius || 1500),
-    type: 'restaurant', // 過濾掉學院、ATM 之類
-  });
-  if (pagetoken) params.set('pagetoken', pagetoken);
+/**
+ * 近距離搜尋
+ * - 若帶 pagetoken 則呼叫下一頁
+ * - 否則用 lat/lng/radius 打第一頁
+ * 回傳：{ places, nextPageToken }
+ */
+export async function searchNearby({ lat, lng, radius, pagetoken } = {}) {
+  try {
+    let url;
+    if (pagetoken) {
+      url = `${NEARBY_ENDPOINT}?pagetoken=${encodeURIComponent(pagetoken)}&key=${API_KEY}`;
+      console.log('[placesSearch] searchNearby(nextPage)', { pagetoken });
+    } else {
+      const qs = new URLSearchParams({
+        location: `${lat},${lng}`,
+        radius: String(radius),
+        // 你要餐廳就鎖 type=restaurant；要更廣可改成 food|restaurant
+        type: 'restaurant',
+        key: API_KEY,
+      });
+      url = `${NEARBY_ENDPOINT}?${qs.toString()}`;
+      console.log('[placesSearch] searchNearby(firstPage)', { lat, lng, radius });
+    }
 
-  const url = `${BASE}?${params.toString()}`;
-  const res = await fetch(url);
-  const json = await res.json();
+    const { data } = await axios.get(url, { timeout: 10000 });
 
-  // Google 會延遲才能用 next_page_token，邏輯交給上層決定要不要稍後再 call
-  const places = (json.results || []).map((r) => ({
+    // Google Places 會回 status，錯誤時把原因也印出來
+    if (data.status && data.status !== 'OK' && data.status !== 'ZERO_RESULTS') {
+      console.error('[placesSearch] Google status != OK', {
+        status: data.status,
+        error_message: data.error_message,
+      });
+    }
+
+    const shaped = shapeNearbyResults(data);
+    console.log('[placesSearch] results', {
+      count: shaped.places.length,
+      hasNext: Boolean(shaped.nextPageToken),
+    });
+
+    return shaped;
+  } catch (err) {
+    console.error('[placesSearch] ERROR', err?.response?.data || err.message);
+    throw err;
+  }
+}
+
+/**
+ * 下一頁包一層，讓其他檔案可以直接呼叫同名
+ */
+export async function searchNextPage(pageToken) {
+  console.log('[placesSearch] searchNextPage()', { pageToken: pageToken ? 'present' : 'missing' });
+  if (!pageToken) return { places: [], nextPageToken: null };
+  return searchNearby({ pagetoken: pageToken });
+}
+
+/**
+ * 把 Google 的回應整理成我們要的結構
+ */
+function shapeNearbyResults(data) {
+  const places = (data?.results || []).map(r => ({
     place_id: r.place_id,
     name: r.name,
     rating: r.rating,
     user_ratings_total: r.user_ratings_total,
-    address: r.vicinity,
+    // 方便做相片 URL
+    photo_reference: r.photos?.[0]?.photo_reference || null,
+    // 地址/鄰里
+    vicinity: r.vicinity,
+    // 距離計算會用到
+    geometry: r.geometry,
+    // 類型，之後若要過濾用得到
     types: r.types,
-    lat: r.geometry?.location?.lat,
-    lng: r.geometry?.location?.lng,
-    photo_reference: r.photos?.[0]?.photo_reference,
+    permanently_closed:
+      r.permanently_closed || r.business_status === 'CLOSED_PERMANENTLY' || false,
   }));
 
-  return { places, nextPageToken: json.next_page_token || null, raw: json };
+  // 注意：Google 的下一頁 token 可能要等 1~2 秒才會生效
+  const nextPageToken = data?.next_page_token || null;
+  return { places, nextPageToken };
 }
 
-export function photoUrl(ref) {
-  if (!ref) return null;
-  const u = new URL('https://maps.googleapis.com/maps/api/place/photo');
-  u.searchParams.set('maxwidth', '1200');
-  u.searchParams.set('photo_reference', ref);
-  u.searchParams.set('key', API_KEY);
-  return u.toString();
-}
-// 讓 cachePlaces.js 可以用舊名稱
+/** 提供舊名稱的相容別名（給 cachePlaces.js 用） */
 export { searchNearby as fetchNearbyPlaces, searchNextPage as fetchNextPage };
+
+/** 也輸出一個預設物件，看誰喜歡怎麼用都行 */
+export default {
+  searchNearby,
+  searchNextPage,
+};
