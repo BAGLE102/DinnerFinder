@@ -2,7 +2,7 @@
 import { client as lineClient } from '../config/line.js';
 import { loadState } from '../model/postbackState.js';
 import { sendExplore, sendRandom } from '../service/exploreRestaurant.js';
-import { getNextPage, searchNearby } from '../service/places.js';
+import { searchNearby } from '../service/places.js';
 import { addFavorite, choosePlace } from '../service/userList.js';
 
 const parseData = (data = '') => Object.fromEntries(new URLSearchParams(data));
