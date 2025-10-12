@@ -4,7 +4,7 @@ import { saveState } from '../model/postbackState.js';
 import { shortId } from '../util/id.js';
 
 const toBubbles = (places = []) => {
-  return places.slice(0, 12).map(p => ({
+  return places.slice(0, 6).map(p => ({
     type: 'bubble',
     ...(p.photoUrl ? {
       hero: {
