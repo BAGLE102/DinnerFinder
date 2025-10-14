@@ -1,38 +1,41 @@
 // model/postbackState.js
+import crypto from 'crypto';
 import { getDb } from '../config/mongo.js';
-import { randomBytes } from 'crypto';
 
-const COLL = 'postback_states';
+const COLL = 'postback_state';
 
-// 建一次 TTL index（2 小時過期）
-async function ensureIndex() {
-  const db = getDb();
-  try {
-    await db.collection(COLL).createIndex({ createdAt: 1 }, { expireAfterSeconds: 7200 });
-  } catch (_) {}
+async function ensureIndexes(db) {
+  await db.collection(COLL).createIndex({ userId: 1, sid: 1 }, { unique: true });
+  await db.collection(COLL).createIndex({ expireAt: 1 }, { expireAfterSeconds: 0 });
 }
 
-export async function saveState(userId, payload) {
-  await ensureIndex();
+function makeSid(len = 10) {
+  // 短、小於 20 bytes，URL 安全
+  return crypto.randomBytes(Math.ceil(len * 0.75)).toString('base64url').slice(0, len);
+}
+
+export async function saveState(userId, payload, ttlSec = 900) {
   const db = getDb();
-  const id = randomBytes(6).toString('base64url'); // 短、好傳
-  await db.collection(COLL).insertOne({
-    _id: id,
+  await ensureIndexes(db);
+  const sid = makeSid(12);
+  const doc = {
     userId,
-    payload,
+    sid,
+    payload,                     // 任何你想存的東西（token / 查詢條件 / 隨機條件）
+    expireAt: new Date(Date.now() + ttlSec * 1000),
     createdAt: new Date(),
-  });
-  return id;
+  };
+  await db.collection(COLL).insertOne(doc);
+  return sid;
 }
 
-export async function loadState(userId, id) {
-  if (!id) return null;
+export async function loadState(userId, sid) {
   const db = getDb();
-  const doc = await db.collection(COLL).findOne({ _id: id, userId });
+  const doc = await db.collection(COLL).findOne({ userId, sid });
   return doc?.payload || null;
 }
 
-export async function deleteState(userId, id) {
+export async function deleteState(userId, sid) {
   const db = getDb();
-  await db.collection(COLL).deleteOne({ _id: id, userId });
+  await db.collection(COLL).deleteOne({ userId, sid });
 }
